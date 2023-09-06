@@ -1,0 +1,10 @@
+defusedxml==0.7.1
+matplotlib==3.7.1
+numpy==1.24.0
+Requests==2.31.0
+sentencepiece==0.1.98
+slixmpp==1.7.1
+slixmpp_omemo==0.4.0
+torch>=2.0.1+cu118
+typing_extensions==4.7.1
+validators==0.21.2

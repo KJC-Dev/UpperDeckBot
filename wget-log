@@ -1,0 +1,25 @@
+--2023-08-14 22:55:03--  https://dts.podtrac.com/redirect.mp3/chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3?aid=rss_feed
+Resolving dts.podtrac.com (dts.podtrac.com)... 52.25.48.141, 52.27.182.185, 52.41.198.17
+Connecting to dts.podtrac.com (dts.podtrac.com)|52.25.48.141|:443... connected.
+HTTP request sent, awaiting response... 302 Found
+Location: https://chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3?aid=rss_feed [following]
+--2023-08-14 22:55:04--  https://chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3?aid=rss_feed
+Resolving chrt.fm (chrt.fm)... 13.226.228.93, 13.226.228.37, 13.226.228.3, ...
+Connecting to chrt.fm (chrt.fm)|13.226.228.93|:443... connected.
+HTTP request sent, awaiting response... 302 Found
+Location: https://stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3?aid=rss_feed [following]
+--2023-08-14 22:55:04--  https://stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3?aid=rss_feed
+Resolving stitcher.simplecastaudio.com (stitcher.simplecastaudio.com)... 18.164.174.80, 18.164.174.113, 18.164.174.5, ...
+Connecting to stitcher.simplecastaudio.com (stitcher.simplecastaudio.com)|18.164.174.80|:443... connected.
+HTTP request sent, awaiting response... 302 Found
+Location: https://stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3/default.mp3_ywr3ahjkcgo_cF9mX3NraXA9dSAg_84dbf369b8493a74a91ffcc8807e2304_27953387.mp3?aid=rss_feed&hash_redirect=1&x-total-bytes=27953387&x-ais-classified=unclassified&listeningSessionID=0CD_382_226__f829bd060ff3aed3c6c2e6ca6149d8ebc7258389 [following]
+--2023-08-14 22:55:04--  https://stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c55c5c14-71ee-4a98-86d5-dae886e0329f/audio/128/default.mp3/default.mp3_ywr3ahjkcgo_cF9mX3NraXA9dSAg_84dbf369b8493a74a91ffcc8807e2304_27953387.mp3?aid=rss_feed&hash_redirect=1&x-total-bytes=27953387&x-ais-classified=unclassified&listeningSessionID=0CD_382_226__f829bd060ff3aed3c6c2e6ca6149d8ebc7258389
+Reusing existing connection to stitcher.simplecastaudio.com:443.
+HTTP request sent, awaiting response... 200 OK
+Length: 27953387 (27M) [audio/mpeg]
+Saving to: ‘default.mp3?aid=rss_feed’
+
+default.mp3?aid=rss_feed                               0%[                                                                                                                      ]       0  --.-KB/s               default.mp3?aid=rss_feed                               5%[=====>                                                                                                                ]   1.37M  6.20MB/s               default.mp3?aid=rss_feed                              18%[====================>                                                                                                 ]   4.81M  11.4MB/s               default.mp3?aid=rss_feed                              28%[================================>                                                                                     ]   7.65M  12.3MB/s               default.mp3?aid=rss_feed                              39%[=============================================>                                                                        ]  10.50M  12.8MB/s               default.mp3?aid=rss_feed                              47%[=======================================================>                                                              ]  12.74M  12.4MB/s               default.mp3?aid=rss_feed                              58%[===================================================================>                                                  ]  15.56M  12.7MB/s               default.mp3?aid=rss_feed                              71%[===================================================================================>                                  ]  19.04M  13.4MB/s               default.mp3?aid=rss_feed                              81%[===============================================================================================>                      ]  21.75M  13.1MB/s               default.mp3?aid=rss_feed                              93%[=============================================================================================================>        ]  24.98M  13.2MB/s               default.mp3?aid=rss_feed                             100%[=====================================================================================================================>]  26.66M  13.6MB/s    in 2.0s    
+
+2023-08-14 22:55:06 (13.6 MB/s) - ‘default.mp3?aid=rss_feed’ saved [27953387/27953387]
+
