@@ -38,17 +38,13 @@ DEFAULT_MODE = "llama.cpp"
 DEFAULT_API_HOST = "127.0.0.1:8080"
 
 
-# Used by the EchoBot
+# Used by the ChatBot
 LEVEL_DEBUG = 0
 LEVEL_ERROR = 1
 
 class XMPPBot(ClientXMPP):
     """
-    A simple Slixmpp bot that will echo encrypted messages it receives, along
-    with a short thank you message.
-
-    For details on how to build a client with slixmpp, look at examples in the
-    slixmpp repository.
+    A simple Slixmpp bot that will query a number of different popular API's for Large Language models
     """
 
     eme_ns = 'eu.siacs.conversations.axolotl'
@@ -193,7 +189,7 @@ class XMPPBot(ClientXMPP):
             # us, and we can't decrypt it.
             await self.plain_reply(
                 mto, mtype,
-                'ERROR: MESSAGE NOT ENCRYPTED FOR ME.',
+                'NOTICE: NEW ENCRYPTION KEY DETECTED. REGISTERING NEW DEVICE IN KEYSTORE',
             )
         except (NoAvailableSession,) as exn:
             # We received a message from that contained a session that we
@@ -219,7 +215,7 @@ class XMPPBot(ClientXMPP):
             await self.plain_reply(
                 mto, mtype,
                 f'NOTICE: NEW DEVICE "{exn.device}" DETECTED FOR ACCOUNT "{exn.bare_jid}". '
-                f'WELCOME, NEW OR RETURNING USER. IF ABOVE ERROR PERSISTS CONTACT THE ADMIN',
+                f'WELCOME, NEW OR RETURNING USER.',
             )
             # We resend, setting the `allow_untrusted` parameter to True.
             await self.message_handler(msg, allow_untrusted=True)
