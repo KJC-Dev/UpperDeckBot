@@ -338,13 +338,13 @@ if __name__ == '__main__':
 
     # JSON file that sets the starting prompt for a session
     parser.add_argument("-s", "--system-prompt", dest="system_prompt",
-                        help="Backend JSON profile", default=DEFAULT_CONFIG_PATH)
+                        help="Backend JSON profile defaults to config/defaults.json", default=DEFAULT_CONFIG_PATH)
     # What style of API call to use when querying in the API
     parser.add_argument("-m", "--mode", dest="mode",
-                        help="Whether to use kobold.cpp or llama.cpp stype API calls.", default=DEFAULT_MODE)
+                        help="Whether to use kobold.cpp or llama.cpp stype API calls. Defaults to llama.cpp", default=DEFAULT_MODE)
     # The host where API calls are being served
     parser.add_argument("-a", "--api-host", dest="api_host",
-                        help="Whether to use kobold.cpp or llama.cpp stype API calls.", default=DEFAULT_API_HOST)
+                        help="The host where the API is being served from. Defaults to http://locahost:8080", default=DEFAULT_API_HOST)
 
     args = parser.parse_args()
 
