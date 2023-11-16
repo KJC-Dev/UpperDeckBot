@@ -1,0 +1,3 @@
+Requests==2.31.0
+slixmpp==1.8.4
+slixmpp_omemo==0.9.1
