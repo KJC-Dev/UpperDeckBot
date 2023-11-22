@@ -55,22 +55,26 @@ class XMPPBot(ClientXMPP):
         'accept': 'application/json',
         'Content-Type': 'application/json'
     }
-    def __init__(self, jid, password,config_path,mode,api_host):
+    def __init__(self, jid, password,room,nick,config_path,mode,api_host):
         ClientXMPP.__init__(self, jid, password)
 
         self.prefix_re: re.Pattern = re.compile('^%s' % self.cmd_prefix)
         self.cmd_re: re.Pattern = re.compile('^%s(?P<command>\w+)(?:\s+(?P<args>.*))?' % self.cmd_prefix)
 
         self.add_event_handler("session_start", self.start)
+      #  self.add_event_handler("groupchat_message", self.muc_message)
         self.register_handler(CoroutineCallback('Messages',
                                                 MatchXPath(f'{{{self.default_ns}}}message'),
                                                 self.message_handler,
                                                 ))
         with open(config_path, 'r') as file:
-            self.default_prompt = json.load(file)
+            self.character_card = json.load(file)
+        self.room = room
+        self.nick = nick
         self.mode = mode
         self.api_host = api_host
         self.user_sessions = {}
+
     def start(self, _event) -> None:
         """
         Process the session_start event.
@@ -86,7 +90,47 @@ class XMPPBot(ClientXMPP):
         """
         self.send_presence()
         self.get_roster()
+        self.plugin['xep_0045'].join_muc(self.room,
+                                         self.nick,
+                                         # If a room password is needed, use:
+                                         # password=the_room_password,
+                                         )
 
+# TODO see if if/else blocks can be made more readable
+    def api_call(self, mfrom, decoded_msg):
+        if mfrom.bare not in self.user_sessions:
+            self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
+
+        if self.character_card['format'] == "alpaca":
+            self.user_sessions[mfrom.bare]['prompt'] += f'{decoded_msg}\n### Response:\n'
+        elif self.character_card['format'] == "chatml":
+            self.user_sessions[mfrom.bare]['prompt'] += f'{decoded_msg}<|im_end|>\n<|im_start|>assistant'
+        elif self.character_cardp['format'] == "pygmalion":
+            self.user_sessions[mfrom.bare]['prompt'] += f' {decoded_msg}\n{self.user_sessions[mfrom.bare]["name"]}:'
+        if self.mode == "llama.cpp":
+            response = requests.post(f'{self.api_host}/completion', headers=self.headers,
+                                     data=json.dumps(self.user_sessions[mfrom.bare]))
+            response_json = json.loads(response.text)
+            response = response_json['content']
+        elif self.mode == "kobold.cpp":
+            response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
+                                     data=json.dumps(self.user_sessions[mfrom.bare]))
+            response_json = response.json()
+            response = response_json['results'][0]['text']
+
+        if self.character_card['format'] == "alpaca":
+            self.user_sessions[mfrom.bare]['prompt'] += f'{response}\n### Instruction:\n'
+        elif self.character_card['format'] == "chatml":
+            # Clear incorrectly formmated chatml
+            response = response.replace("<|im_end|>","")
+            response = response.replace("<|im_start|>", "")
+            self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|im_end|>\n<|im_start|>user'
+        elif self.character_cardp['format'] == "pygmalion":
+            response = response.replace("\n" + self.user_sessions[mfrom.bare]['name'] + ": ", "")
+            response = response.replace("You:", "")
+            self.user_sessions[mfrom.bare]['prompt'] += response + '\nYou: '
+        return response
+        
     def is_command(self, body: str) -> bool:
         return self.prefix_re.match(body) is not None
 
@@ -126,7 +170,7 @@ class XMPPBot(ClientXMPP):
         return await self.encrypted_reply(mto, mtype, body)
 
     async def cmd_resetcontext(self, mto: JID, mtype: str) -> None:
-        self.user_sessions[mto.bare] = copy.deepcopy(self.default_prompt) # Deepcopy prevents passing reference
+        self.user_sessions[mto.bare] = copy.deepcopy(self.character_card) # Deepcopy prevents passing reference
                                                                            # use it in all cases
         body = '''NOTICE: CONTEXT WINDOW CLEARED SUCCESSFULLY.'''
         return await self.encrypted_reply(mto, mtype, body)
@@ -161,28 +205,11 @@ class XMPPBot(ClientXMPP):
             # body-less OMEMO message (see KeyTransportMessages), currently
             # used for example to send heartbeats to other devices.
             if body is not None:
-                decoded = body.decode('utf8')
-                if self.is_command(decoded):
-                    await self.handle_command(mto, mtype, decoded)
+                decoded_msg = body.decode('utf8')
+                if self.is_command(decoded_msg):
+                    await self.handle_command(mto, mtype, decoded_msg)
                 else:
-                    if mfrom.bare not in self.user_sessions:
-                        self.user_sessions[mfrom.bare] = copy.deepcopy(self.default_prompt)
-
-                    self.user_sessions[mto.bare]['prompt'] += f' {decoded}\n{self.user_sessions[mfrom.bare]["name"]}:'
-                    if self.mode == "llama.cpp":
-                        response = requests.post(f'{self.api_host}/completion', headers=self.headers,
-                                                 data=json.dumps(self.user_sessions[mto.bare]))
-                        response_json = json.loads(response.text)
-                        response = response_json['content']
-                    elif self.mode == "kobold.cpp":
-                        response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
-                                                 data=json.dumps(self.user_sessions[mto.bare]))
-                        response_json = response.json()
-                        response = response_json['results'][0]['text']
-                        response = response.replace("\n" + self.user_sessions[mto.bare]['name'] + ":", "")
-                        response = response.replace("You:", "")
-
-                    self.user_sessions[mto.bare]['prompt']+= response + '\nYou: '
+                    response = self.api_call(mfrom, decoded_msg)
                     await self.encrypted_reply(mto, mtype, response)
         except (MissingOwnKey,):
             # The message is missing our own key, it was not encrypted for
@@ -305,8 +332,6 @@ class XMPPBot(ClientXMPP):
                 raise
 
         return None
-
-
 if __name__ == '__main__':
     # Setup the command line arguments.
     parser = ArgumentParser(description=XMPPBot.__doc__)
@@ -365,11 +390,11 @@ if __name__ == '__main__':
     # Ensure OMEMO data dir is created
     os.makedirs(args.data_dir, exist_ok=True)
 
-    xmpp = XMPPBot(args.jid, args.password, args.system_prompt,args.mode,args.api_host)
+    xmpp = XMPPBot(args.jid, args.password,args.room,args.nick, args.system_prompt,args.mode,args.api_host)
     xmpp.register_plugin('xep_0030')  # Service Discovery
     xmpp.register_plugin('xep_0199')  # XMPP Ping
     xmpp.register_plugin('xep_0380')  # Explicit Message Encryption
-
+    xmpp.register_plugin('xep_0045')  # Multi User Chat
     try:
         xmpp.register_plugin(
             'xep_0384',
