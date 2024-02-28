@@ -5,8 +5,8 @@ UpperDeckBot is a powerful and flexible XMPP chatbot built using the slixmpp Pyt
 ✅ Key Features:
 
 1. 🔒 Security: UpperDeckBot leverages security focused XMPP extentions such as OMEMO to effortlessly create a End to end encrypted(E2EE) connection to large language models hosted on your network, ensuring quick response times and enhanced security.
-2. 🎨 Multimodal: UpperDeckBot can generate images via Stable Diffusion and search for information on locally hosted offline mirrors of Wikipedia(using XOWA) as needed to answer user requests without ever leaving your network
-3. 🛠 Customizable: UpperDeckBot is designed for easy modification of both the system prompt as well as the addition of per users profiles as needed for different use cases
+2. 🎨 Multimodal: UpperDeckBot can generate images via Stable Diffusion and search for information on locally hosted offline mirrors of Wikipedia(using XOWA) as needed to answer user requests without ever leaving your network.
+3. 🛠 Customizable: UpperDeckBot is designed for easy modification of both the system prompt as well as the addition of per users profiles as needed for different use cases.
 4. 🫱🏻‍🫲🏿 Cross-platform: UpperDeckBot works flawlessly on Windows, macOS, and Linux operating systems and can be run seperately from the services it connects to.
 
 🚧 Work in Progress Items:
