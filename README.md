@@ -1,4 +1,4 @@
-🔭 UpperDeckBot: The AI-Powered chatbot that gives you to a whole ✨constellation✨ of open source tools 
+🔭 UpperDeckBot: The AI-Powered chatbot that connects you to a whole ✨constellation✨ of open source tools
 
 UpperDeckBot is a powerful and flexible XMPP chatbot built using the slixmpp Python Library, designed to act as an End to End Encrypted(E2EE) bridge for accessing internal network resources when in the outside world.
 
