@@ -26,7 +26,7 @@ Getting Started:
    ```
    pip install -r requirements.txt
    ```
-2. Configure UpperDeckBot by editing the `config.yml` file with your desired settings.
+2. Configure UpperDeckBot by editing the your chosen profile in the config folder with your desired settings.
 
 4. Start the bot replacing the varibles with your own :
    ```
