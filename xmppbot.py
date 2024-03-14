@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+import asyncio
 import os
 import re
+import secrets
+import threading
 import sys
 import logging
 from PIL import Image
@@ -31,7 +33,6 @@ from slixmpp_omemo import PluginCouldNotLoad, MissingOwnKey, EncryptionPrepareEx
 from slixmpp_omemo import UndecidedException, UntrustedException, NoAvailableSession
 from omemo.exceptions import MissingBundleException
 
-
 log = logging.getLogger(__name__)
 DEFAULT_CONFIG_PATH = "config/defaults.json"
 DEFAULT_MODE = "llama.cpp"
@@ -39,15 +40,15 @@ DEFAULT_API_HOST = "127.0.0.1:8080"
 DEFAULT_SD_HOST = "http://127.0.0.1:7860/sdapi/v1/txt2img"
 
 HEADERS = {
-            'accept': 'application/json',
-            'Content-Type': 'application/json'
-          }
+    'accept': 'application/json',
+    'Content-Type': 'application/json'
+}
 
 # Used by the ChatBot
 LEVEL_DEBUG = 0
 LEVEL_ERROR = 1
 
-class bcolors:
+class Colors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
@@ -59,6 +60,31 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
+class XMPPBotStream(threading.Thread):
+
+
+    def run(self):
+        self.current_response = ""
+        self.str_mfrom = ""
+        self.mfrom = JID()
+        self.mfrom.bare = self.str_mfrom
+        i = 0;
+        # code for the background job goes here
+        while i < 10:
+            self.current_response = subprocess.check_output(["curl",
+                                                             "-s",
+                                                             "-X",
+                                                             "GET",
+                                                             "http://localhost:5001/api/extra/generate/check",
+                                                             "-H",
+                                                             "accept: application/json",
+                                                             "-H",
+                                                             "Content-Type: application/json"])
+            i += 1
+            time.sleep(5)
+            print(self.current_response)
+            xmpp.encrypted_reply(self.mfrom, "chat", self.current_response)
+
 class XMPPBot(ClientXMPP):
     """
     A simple Slixmpp bot that will query a number of different popular API's for Large Language models
@@ -69,13 +95,15 @@ class XMPPBot(ClientXMPP):
     txt2img_prefix = 'txt2img://'
     http_prefix = 'http://'
     https_prefix = 'https://'
+    wikipedia_prefix = 'wiki://'
     today = date.today()
     debug_level: int = LEVEL_ERROR  # LEVEL_ERROR or LEVEL_DEBUG
     headers = {
         'accept': 'application/json',
         'Content-Type': 'application/json'
     }
-    def __init__(self, jid, password,room,nick,config_path,mode,api_host,dry_run):
+
+    def __init__(self, jid, password, room, nick, config_path, mode, api_host, dry_run,voicemail):
         ClientXMPP.__init__(self, jid, password)
 
         self.command_prefix_re: re.Pattern = re.compile('^%s' % self.cmd_prefix)
@@ -83,7 +111,7 @@ class XMPPBot(ClientXMPP):
         self.cmd_re: re.Pattern = re.compile('^%s(?P<command>\w+)(?:\s+(?P<args>.*))?' % self.cmd_prefix)
 
         self.add_event_handler("session_start", self.start)
-      #  self.add_event_handler("groupchat_message", self.muc_message)
+        #  self.add_event_handler("groupchat_message", self.muc_message)
         self.register_handler(CoroutineCallback('Messages',
                                                 MatchXPath(f'{{{self.default_ns}}}message'),
                                                 self.message_handler,
@@ -96,6 +124,7 @@ class XMPPBot(ClientXMPP):
         self.api_host = api_host
         self.user_sessions = {}
         self.dry_run = dry_run
+        self.voicemail = voicemail
 
     def start(self, _event) -> None:
         """
@@ -118,98 +147,135 @@ class XMPPBot(ClientXMPP):
                                          # If a room password is needed, use:
                                          # password=the_room_password,
                                          )
-    async def extract_url(self,line):
-        regex = r'(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])'
+
+    async def extract_url(self, line):
+        regex = (r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
         find_urls_in_string = re.compile(regex, re.IGNORECASE)
         url = find_urls_in_string.search(line)
         if url is not None and url.group(0) is not None:
-            #print("URL parts: " + str(
+            # print("URL parts: " + str(
             #    url.groups()))  # OUTPUT: ('http://www.google.com', 'http', 'google.com', 'com', None, None)
-            #print("URL" + url.group(0).strip())  # OUTPUT: http://www.google.com
+            # print("URL" + url.group(0).strip())  # OUTPUT: http://www.google.com
             return url.group(0).strip()
         return line
 
-# TODO see if if/else blocks can be made more readable
     async def api_call(self, mfrom, mtype, prompt):
-
-        # Pre functions
-
+        # --Pre Function 1: Generic HTTP/HTTPS--
         for line in prompt.splitlines():
             if self.http_prefix in line or self.https_prefix in line:
-                new_line = line.replace(self.http_prefix, 'Link: ' + self.http_prefix)
-                new_line = line.replace(self.https_prefix, 'Link: ' + self.https_prefix)
-                extracted_url= await self.extract_url(line)
+                new_line = line.replace(self.http_prefix, 'Link:' + self.http_prefix)
+                new_line = line.replace(self.https_prefix, 'Link:' + self.https_prefix)
+                extracted_url = await self.extract_url(line)
+
                 new_line += "\nContents: " + await self.http_request(url=extracted_url)
                 prompt = prompt.replace(line, new_line)
+            # -------------------------------------------------------#
+            # --Pre Function 2: Local Wikitext Lookup--
+        #    if self.wikipedia_prefix in line:
+        #        new_line = line.replace(self.wikipedia_prefix, ': ' + self.https_prefix)
+        # -------------------------------------------------------#
+
+        # Preprocessing the prompt format
+        match self.character_card['format']:
+            case "alpaca":
+                self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}\n### Response:\n'
+            case "mistral":
+                self.user_sessions[mfrom.bare]['prompt'] += f'[INST] {prompt}[/INST] '
+            case "chatml":
+                self.user_sessions[mfrom.bare]['prompt'] += f'user\n{prompt}<|im_end|>\n<|im_start|>assistant\n'
+            case "pygmalion":
+                self.user_sessions[mfrom.bare]['prompt'] += f' {prompt}\n{self.user_sessions[mfrom.bare]["name"]}:'
+            case _:
+                raise "Config Error: No matching prompt format found"
 
 
-        if self.character_card['format'] == "alpaca":
-            self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}\n### Response:\n'
-        elif self.character_card['format'] == "mistral":
-            self.user_sessions[mfrom.bare]['prompt'] += f' <s> [INST] {prompt} [/INST]'
-        elif self.character_card['format'] == "chatml":
-            self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}<|im_end|>\n<|im_start|>assistant\n'
-        elif self.character_card['format'] == "pygmalion":
-            self.user_sessions[mfrom.bare]['prompt'] += f' {prompt}\n{self.user_sessions[mfrom.bare]["name"]}:'
+       # current_session = XMPPBotStream()
+       # current_session.mfrom = mfrom
+       # current_session.start()
 
-
-
-        # Mid Functions
-        if self.mode == "llama.cpp":
-            response = requests.post(f'{self.api_host}/completion', headers=self.headers,
-                                     data=json.dumps(self.user_sessions[mfrom.bare]))
-            response_json = json.loads(response.text)
-            response = response_json['content']
-        elif self.mode == "kobold.cpp":
-            response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
-                                     data=json.dumps(self.user_sessions[mfrom.bare]))
-            response_json = response.json()
-            response = response_json['results'][0]['text']
-
-
+        response = await self.api_session(mfrom)
+        #log.info(current_session.current_response)
         # Post functions
-        if self.character_card['format'] == "alpaca":
-            self.user_sessions[mfrom.bare]['prompt'] += f'{response}\n### Instruction:\n'
-        elif self.character_card['format'] == "chatml":
-            # Clear incorrectly formmated chatml
-            response = response.replace("<|im_end|>", "")
-            response = response.replace("<|im_start|>", "")
-            response = response.replace("\nuser", "")
-            self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|im_end|>\n<|im_start|>user'
-        elif self.character_card['format'] == "mistral":
-            response = response.split("\n[", 1)[0]
-            self.user_sessions[mfrom.bare]['prompt'] += f' {response} </s>'
-        elif self.character_card['format'] == "pygmalion":
-            response = response.replace("\n" + self.user_sessions[mfrom.bare]['name'] + ": ", "")
-            response = response.replace("You:", "")
-            self.user_sessions[mfrom.bare]['prompt'] += response + '\nYou: '
+        match self.character_card['format']:
+            case "alpaca":
+                self.user_sessions[mfrom.bare]['prompt'] += f'{response}\n### Instruction:\n'
+            case "chatml":
+                # Clear incorrectly formmated chatml
+                response = response.replace("<|im_end|>", "")
+                response = response.replace("<|im_start|>", "")
+                response = response.replace("\nuser", "")
+                # Add correcly formated chatml
+                self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|im_end|>\n<|im_start|>user'
+            case "mistral":
+                # clean badly formated mistral close brackets
+                response = response.split("\n[", 1)[0]
+                self.user_sessions[mfrom.bare]['prompt'] += f' {response} </s>'
+            case "pygmalion":
+                response = response.replace("\n" + self.user_sessions[mfrom.bare]['name'] + ": ", "")
+                response = response.replace("You:", "")
+                self.user_sessions[mfrom.bare]['prompt'] += response + '\nYou: '
 
+            # -------------------------------------------------------#
+            # --Post Function 1: txt2img generation--
         for line in response.splitlines():
             if self.txt2img_prefix in line:
-                line = line.replace(self.txt2img_prefix, '')
-                response.replace(self.txt2img_prefix, 'Prompt:')
-                await self.encrypted_reply(mfrom, mtype, await self.upload_txt2img(txt2img_prompt=line))
-
-
-       # print(self.user_sessions[mfrom.bare]['prompt'])
+                self.encrypted_reply(mto=mfrom,mtype="chat", body=await self.upload_txt2img(txt2img_prompt=line))
+            # -------------------------------------------------------#
+        # print(self.user_sessions[mfrom.bare]['prompt'])
         return response
 
+    async def api_session(self, mfrom):
+        # making the call
+        match self.mode:
+            case "llama.cpp":
+                response = requests.post(f'{self.api_host}/completion', headers=self.headers,
+                                         data=json.dumps(self.user_sessions[mfrom.bare]))
+                response_json = json.loads(response.text)
+                return response_json['content']
+
+            case "kobold.cpp":
+                response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
+                                         data=json.dumps(self.user_sessions[mfrom.bare]))
+                response_json = response.json()
+                return response_json['results'][0]['text']
+
+    # leave 500 tokens left for actual answering the question and followup questions
     async def http_request(self, url: str):
         session = requests.session()
-        req = session.get(url)
+
+        try:
+            req = session.get(url)
+        except:
+            return "INFORMATION: AN ERROR OCCURED WHEN ACCESSING THE WEBPAGE. PLEASE INFORM THE USER."
         doc = BeautifulSoup(req.content, features="lxml")
-        filtered_tags = doc.findAll('p')
-        paragraphs = [tag.get_text(strip=True) for tag in filtered_tags]
+        p_tags = [tag.get_text(strip=True) for tag in doc.findAll('p')]
+        code_tags = [tag.get_text(strip=True) for tag in doc.findAll('code')]
+        a_tags = [tag.get_text(strip=True) for tag in doc.findAll('a')]
+
+     #   code_tags = ["--help","--clblast"]
+        for idx,p_tag in enumerate(p_tags):
+            for code_tag in code_tags:
+                if code_tag in p_tag and code_tag != '':
+                    p_tags[idx] = p_tag.replace(code_tag," "+code_tag+" ")
+#            for a_tag in a_tags:
+#                if a_tag in p_tag and a_tag != '':
+#                    p_tags[idx] = p_tag.replace(a_tag," "+a_tag+" ")
+
+
+
+        paragraphs = p_tags
         combined_text = ""
         for paragraph in paragraphs:
-            if len(combined_text) < 10000:
-                combined_text += paragraph
+            if len(combined_text) < self.character_card['max_context_length'] - 500:
+                combined_text += paragraph + " "
         return combined_text
-    async def upload_txt2img(self, txt2img_prompt:str):
+
+    async def upload_txt2img(self, txt2img_prompt: str):
         data = {
             "prompt": txt2img_prompt,
             "negative_prompt": "watermark,text,signature,author signature,nsfw,nude,hentai",
-            "steps": 20
+            # todo make these not hardcoded
+            "steps": 20  # todo make these not hardcoded
         }
         response = requests.post(DEFAULT_SD_HOST, data=json.dumps(data))
         # Load the response JSON into a python dictionary
@@ -224,7 +290,7 @@ class XMPPBot(ClientXMPP):
 
         # Save the image into a file named "output.png" in the current directory
         current_time = int(time.time())
-        img_path = str(sys.path[0])+"/images/" + str(current_time) + ".png"
+        img_path = str(sys.path[0]) + "/images/" + str(current_time) + ".png"
         img.save(img_path)
         upload_link = await self.plugin['xep_0454'].upload_file(filename=Path(img_path))
 
@@ -257,17 +323,17 @@ class XMPPBot(ClientXMPP):
         elif cmd == 'rc':
             await self.cmd_resetcontext(mto, mtype)
         elif cmd == 's':
-			
-            await self.cmd_shell(mto, mtype,body)
+
+            await self.cmd_shell(mto, mtype, body)
 
         return None
 
     async def cmd_help(self, mto: JID, mtype: str) -> None:
         body = (
-            'Hello my name is ' + args.jid+'\n' 
-            'The following commands are available:\n'
-            f'{self.cmd_prefix}rc Clear your current conversation with the chatbot\n'
-            f'{self.cmd_prefix}rtd roll dice to decide a random number\n'
+                'Hello my name is ' + args.jid + '\n'
+                                                 'The following commands are available:\n'
+                                                 f'{self.cmd_prefix}rc Clear your current conversation with the chatbot\n'
+                                                 f'{self.cmd_prefix}rtd roll dice to decide a random number\n'
         )
         return await self.encrypted_reply(mto, mtype, body)
 
@@ -278,11 +344,11 @@ class XMPPBot(ClientXMPP):
         return await self.encrypted_reply(mto, mtype, body)
 
     async def cmd_resetcontext(self, mto: JID, mtype: str) -> None:
-        self.user_sessions[mto.bare] = copy.deepcopy(self.character_card) # Deepcopy prevents passing reference
-                                                                           # use it in all cases
+        self.user_sessions[mto.bare] = copy.deepcopy(self.character_card)  # Deepcopy prevents passing reference
+        # use it in all cases
         body = '''NOTICE: CONTEXT WINDOW CLEARED SUCCESSFULLY.'''
         return await self.encrypted_reply(mto, mtype, body)
-     
+
     async def cmd_shell(self, mto: JID, mtype: str, body: str) -> None:
         if mto.bare == "kyler@upperdeckcommittee.xyz":
             body = subprocess.check_output(body[3:], shell=True).decode('utf-8')
@@ -290,16 +356,17 @@ class XMPPBot(ClientXMPP):
         else:
             return None
 
-
     async def dry_run_mode(self) -> None:
         self.user_sessions["dryrun@example.com"] = copy.deepcopy(self.character_card)
         dry_run_jid = JID()
         dry_run_jid.bare = "dryrun@example.com"
-       # output = " "+str(time.time())
+        # output = " "+str(time.time())
         while True:
             time.sleep(0.5)
-            prompt=input("USER     ")
-            output = await self.api_call(dry_run_jid,"chat",prompt)
+            prompt = input("USER     ")
+            #  self.api_call_preprocessing
+            # response = api
+            output = await self.api_call(dry_run_jid, "chat", prompt)
             log.info(output[1:])
 
     async def message_handler(self, msg: Message, allow_untrusted: bool = False) -> None:
@@ -332,6 +399,7 @@ class XMPPBot(ClientXMPP):
         try:
             if mfrom.bare not in self.user_sessions:
                 self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
+            #   self.user_sessions[mfrom.bare]['genkey'] = secrets.token_hex(20) # assign a unique key to the user session
             encrypted = msg['omemo_encrypted']
             body = await self['xep_0384'].decrypt_message(encrypted, mfrom, allow_untrusted)
             # decrypt_message returns Optional[str]. It is possible to get
@@ -341,8 +409,28 @@ class XMPPBot(ClientXMPP):
                 decoded_msg = body.decode('utf8')
                 if self.is_command(decoded_msg):
                     await self.handle_command(mto, mtype, decoded_msg)
+
                 else:
-                    response = await self.api_call(mfrom,mtype,  decoded_msg)
+                    response = await self.api_call(mfrom, mtype, decoded_msg)
+                    if self.voicemail:
+                        # TODO remove hard coding and make more pythonic
+                        file = open("/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/input.txt", "w")
+                        file.write(response) # change this to response for normal voicemail mode
+                        file.close()
+                        os.system(
+                            "/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/venv/bin/python "
+                            "/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/test.py")
+
+                        os.remove("/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/input.txt")
+                        os.system("ffmpeg -i /mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/output.wav -i "
+                                  "/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/input/brown-noise.wav "
+                                  "-filter_complex amix=inputs=2:duration=shortest "
+                                  "/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/output.mp3 -y")
+                        await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
+                            filename=Path("/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/output.mp3")))
+                        os.remove("/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/output.mp3")
+                        os.remove("/mnt/43f98785-fae4-4881-8a66-73faa74efa73/tts/output.wav")
+
                     await self.encrypted_reply(mto, mtype, response)
         except (MissingOwnKey,):
             # The message is missing our own key, it was not encrypted for
@@ -465,6 +553,8 @@ class XMPPBot(ClientXMPP):
                 raise
 
         return None
+
+
 if __name__ == '__main__':
     # Setup the command line arguments.
     parser = ArgumentParser(description=XMPPBot.__doc__)
@@ -506,25 +596,24 @@ if __name__ == '__main__':
     parser.add_argument("-a", "--api-host", dest="api_host",
                         help="The host where the API is being served from. Defaults to http://locahost:8080",
                         default=DEFAULT_API_HOST)
+    parser.add_argument("--voicemail", dest="voicemail",
+                        help="The bot responses using an mp3 to generate a text to speech file",
+                        action='store_true',default=None)
 
     parser.add_argument("--dry-run", dest="dry_run",
                         help="Connect normally but open a direct session with the underlying LLM, bypassing XMPP",
-                        action='store_true',default=None)
+                        action='store_true', default=None)
 
     args = parser.parse_args()
     # Setup logging.
     logging.basicConfig(level=args.loglevel,
                         format='%(levelname)-8s %(message)s')
 
-
     # prompt for creds in case arguments are not supplied
     if args.jid is None:
         args.jid = input("Username: ")
     if args.password is None:
         args.password = getpass("Password: ")
-
-
-
 
     # Setup the ChatBot and register plugins. Note that while plugins may
     # have interdependencies, the order in which you register them does
@@ -538,8 +627,20 @@ if __name__ == '__main__':
     else:
         dry_run = False
 
-    xmpp = XMPPBot(args.jid, args.password,args.room,args.nick, args.system_prompt,args.mode,args.api_host,dry_run)
+    if args.voicemail is not None:
+        voicemail = True
+    else:
+        voicemail = False
 
+    xmpp = XMPPBot(jid=args.jid,
+                   password=args.password,
+                   room=args.room,
+                   nick=args.nick,
+                   config_path=args.system_prompt,
+                   mode=args.mode,
+                   api_host=args.api_host,
+                   dry_run=dry_run,
+                   voicemail=voicemail)
 
     xmpp.register_plugin('xep_0030')  # Service Discovery
     xmpp.register_plugin('xep_0199')  # XMPP Ping
@@ -559,11 +660,9 @@ if __name__ == '__main__':
         log.exception('And error occurred when loading the omemo plugin.')
         sys.exit(1)
 
-
     # Connect to the XMPP server and start processing XMPP stanzas.
     xmpp.connect()
     xmpp.process()
-
 
 """
 ⠀⠀⠀⠀⡾⣦⡀⠀⠀⡀⠀⣰⢷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
