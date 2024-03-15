@@ -3,6 +3,7 @@ omemo
 .idea
 venv
 models
+<<<<<<< HEAD
 create
 images
 input
@@ -14,3 +15,6 @@ dev.py
 output-dev.wav
 input-dev.txt
 output
+=======
+images
+>>>>>>> f545cf973746e8ea9a12d2e57b0d0fc01bdc5bf2
