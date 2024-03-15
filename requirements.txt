@@ -1,3 +1,5 @@
 Requests==2.31.0
-slixmpp==1.8.4
+slixmpp==1.8.5
 slixmpp_omemo==0.9.1
+beautifulsoup4
+protobuf<4.24,>=3.19.6
