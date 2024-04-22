@@ -1,10 +1,6 @@
 Requests==2.31.0
-<<<<<<< HEAD
 slixmpp==1.8.5
 slixmpp_omemo==0.9.1
 beautifulsoup4
 protobuf<4.24,>=3.19.6
-=======
-slixmpp>=1.8.4
-slixmpp_omemo>=0.9.1
->>>>>>> f545cf973746e8ea9a12d2e57b0d0fc01bdc5bf2
+

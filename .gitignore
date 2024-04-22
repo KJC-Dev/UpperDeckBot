@@ -3,7 +3,6 @@ omemo
 .idea
 venv
 models
-<<<<<<< HEAD
 create
 images
 input
@@ -14,7 +13,13 @@ output.wav
 dev.py
 output-dev.wav
 input-dev.txt
+output.wav
+output.mp3
 output
+XTTS-V2
+output
+*.mp3
+*.wav
 =======
 images
->>>>>>> f545cf973746e8ea9a12d2e57b0d0fc01bdc5bf2
+

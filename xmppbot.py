@@ -170,24 +170,22 @@ class XMPPBot(ClientXMPP):
 
     async def api_call(self, mfrom, mtype, prompt):
 
-        # if in debug echo simply return the prompt
-        if self.echo_run:
-            return prompt
+        # if in echo debug mode simply return the prompt discarding any context
+        #if self.echo_run:
+		#	self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
+        #    return prompt
 
         # --Pre Function 2: Generic HTTP/HTTPS--
-        for line in prompt.splitlines():
-            if self.http_prefix in line or self.https_prefix in line:
-                new_line = line.replace(self.http_prefix, 'Link:' + self.http_prefix)
-                new_line = line.replace(self.https_prefix, 'Link:' + self.https_prefix)
-                extracted_url = await self.extract_url(line)
+        #for line in prompt.splitlines():
+            #if self.http_prefix in line or self.https_prefix in line:
+                #new_line = line.replace(self.http_prefix, 'Link:' + self.http_prefix)
+                #new_line = line.replace(self.https_prefix, 'Link:' + self.https_prefix)
+                #extracted_url = await self.extract_url(line)
 
-                new_line += "\nContents: " + await self.http_request(url=extracted_url)
-                prompt = prompt.replace(line, new_line)
+                #new_line += "\nContents: " + await self.http_request(url=extracted_url)
+                #prompt = prompt.replace(line, new_line)
             # -------------------------------------------------------#
-            # --Pre Function 2: Local Wikitext Lookup--
-            if self.wikipedia_prefix in line:
-                line = line.replace("_"," ")
-                new_line = line.replace(self.wikipedia_prefix, ': ' + self.https_prefix)
+
                 
         # -------------------------------------------------------#
 
@@ -200,7 +198,11 @@ class XMPPBot(ClientXMPP):
             case "chatml":
                 self.user_sessions[mfrom.bare]['prompt'] += f'user\n{prompt}<|im_end|>\n<|im_start|>assistant\n'
             case "pygmalion":
-                self.user_sessions[mfrom.bare]['prompt'] += f' {prompt}\n{self.user_sessions[mfrom.bare]["name"]}:'
+                self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}\n{self.user_sessions[mfrom.bare]["name"]}:'
+            case "vicuna":
+                self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}\nASSISTANT: '
+            case "llama3":
+                self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
             case _:
                 raise "Config Error: No matching prompt format found"
 
@@ -212,6 +214,16 @@ class XMPPBot(ClientXMPP):
 
         #log.info(current_session.current_response)
         # Post functions
+
+        # -------------------------------------------------------#
+        # --Post Function 1: txt2img generation--
+        for line in response.splitlines():
+            if self.txt2img_prefix in line:
+                await self.encrypted_reply(mto=mfrom,mtype="chat", body=await self.upload_txt2img(txt2img_prompt=line))
+        # -------------------------------------------------------#
+        # -------------------------------------------------------#
+
+
         match self.character_card['format']:
             case "alpaca":
                 self.user_sessions[mfrom.bare]['prompt'] += f'{response}\n### Instruction:\n'
@@ -230,13 +242,13 @@ class XMPPBot(ClientXMPP):
                 response = response.replace("\n" + self.user_sessions[mfrom.bare]['name'] + ": ", "")
                 response = response.replace("You:", "")
                 self.user_sessions[mfrom.bare]['prompt'] += response + '\nYou: '
-
-            # -------------------------------------------------------#
-            # --Post Function 1: txt2img generation--
-        for line in response.splitlines():
-            if self.txt2img_prefix in line:
-                await self.encrypted_reply(mto=mfrom,mtype="chat", body=await self.upload_txt2img(txt2img_prompt=line))
-            # -------------------------------------------------------#
+            case "vicuna":
+                self.user_sessions[mfrom.bare]['prompt'] += response + '\nUSER: '
+            case "llama3":
+                response = response.replace("!assistant","")
+                response = response.replace("?assistant","")
+                response = response.replace(".assistant","")
+                self.user_sessions[mfrom.bare]['prompt'] += response + '<|start_header_id|>user<|end_header_id|>\n\n'
         return response
 
     async def api_session(self, mfrom):
@@ -379,8 +391,6 @@ class XMPPBot(ClientXMPP):
         while True:
             time.sleep(0.5)
             prompt = input("USER     ")
-            #  self.api_call_preprocessing
-            # response = api
             output = await self.api_call(dry_run_jid, "chat", prompt)
             log.info(output[1:])
 
@@ -426,33 +436,33 @@ class XMPPBot(ClientXMPP):
                     await self.handle_command(mto, mtype, decoded_msg)
 
                 else:
-                    response = await self.api_call(mfrom, mtype, decoded_msg)
-                    if self.voicemail:
-                        # TODO remove hard coding and make more pythonic
-                        file = open(full_path+"input.txt", "w")
-                        file.write(response) # change this to response for normal voicemail mode
-                        file.close()
-                        exec(open(full_path +'tts.py').read())
-                        os.remove(full_path + "input.txt")
-                        await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
+
+                        response = await self.api_call(mfrom, mtype, decoded_msg)
+                        if self.voicemail:
+                            # TODO remove hard coding and make more pythonic
+                            file = open(full_path+"input.txt", "w")
+                            file.write(response) # change this to response for normal voicemail mode
+                            file.close()
+                            exec(open(full_path +'tts.py').read())
+                            os.remove(full_path + "input.txt")
+                            await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
                             filename=Path(full_path+"output.mp3")))
-                    if not self.no_text:
-                        await self.encrypted_reply(mto, mtype, response)
+                        if not self.no_text:
+                            await self.encrypted_reply(mto, mtype, response)
 
         except (MissingOwnKey,):
             # The message is missing our own key, it was not encrypted for
             # us, and we can't decrypt it.
             await self.plain_reply(
                 mto, mtype,
-                'NOTICE: NEW ENCRYPTION KEY DETECTED. REGISTERING NEW DEVICE IN KEYSTORE',
+                'NOTICE: MESSAGE NOT ENCRYPTED FOR US. TRYING TO ADD TO KEYSTORE',
             )
         except (NoAvailableSession,) as exn:
             # We received a message from that contained a session that we
             # don't know about (deleted session storage, etc.). We can't
             # decrypt the message, and it's going to be lost.
             # Here, as we need to initiate a new encrypted session, it is
-            # best if we send an encrypted message directly. XXX: Is it
-            # where we talk about self-healing messages?
+            # best if we send an encrypted message directly.
             await self.encrypted_reply(
                 mto, mtype,
                 'ERROR: MESSAGE USES AN ENCRYPTED '
@@ -461,17 +471,17 @@ class XMPPBot(ClientXMPP):
         except (UndecidedException, UntrustedException) as exn:
             # We received a message from an untrusted device. We can
             # choose to decrypt the message nonetheless, with the
-            # `allow_untrusted` flag on the `decrypt_message` call, which
+            # `allow_untrusted` flag on the `message_handler` call, which
             # we will do here. This is only possible for decryption,
             # encryption will require us to decide if we trust the device
             # or not. Clients _should_ indicate that the message was not
             # trusted, or in undecided state, if they decide to decrypt it
             # anyway.
-            await self.plain_reply(
-                mto, mtype,
-                f'NOTICE: NEW DEVICE "{exn.device}" DETECTED FOR ACCOUNT "{exn.bare_jid}". '
-                f'WELCOME, NEW OR RETURNING USER.',
-            )
+        #    await self.plain_reply(
+        #        mto, mtype,
+        #        f'NOTICE: NEW DEVICE "{exn.device}" DETECTED FOR ACCOUNT "{exn.bare_jid}". '
+        #        f'WELCOME, NEW OR RETURNING USER.',
+        #    )
             # We resend, setting the `allow_untrusted` parameter to True.
             await self.message_handler(msg, allow_untrusted=True)
         except (EncryptionPrepareException,):
@@ -480,8 +490,10 @@ class XMPPBot(ClientXMPP):
             # and given a chance to resolve them already.
             await self.plain_reply(mto, mtype, 'ERROR: UNABLE TO DECRYPT MESSAGE.')
         except (Exception,) as exn:
-            await self.plain_reply(mto, mtype, 'ERROR: EXCEPTION OCCURRED WHILE ATTEMPTING DECRYPTION.\n%r' % exn)
+            await self.plain_reply(mto, mtype, 'ERROR: EXCEPTION OCCURRED WHILE PROCESSING MESSAGE. IF ERROR '
+                                               'PERSISTS CONTACT ADMIN. ERROR IS AS FOLLOWS.\n%r' % exn)
             raise
+            xmpp.disconnect(reason='ERROR: EXCEPTION OCCURRED' % exn)
 
         return None
 

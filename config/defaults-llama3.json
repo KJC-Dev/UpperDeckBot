@@ -1,0 +1,34 @@
+{
+  "name": "UpperDeckGPT",
+  "n": 1,
+  "max_context_length": 8192,
+  "max_length": 100,
+  "rep_pen": 1.1,
+  "temperature": 0.2,
+  "top_p": 0.92,
+  "top_k": 50,
+  "top_a": 0,
+  "typical": 1,
+  "tfs": 1,
+  "rep_pen_range": 320,
+  "rep_pen_slope": 0.7,
+  "quiet": true,
+  "format": "llama3",
+  "stop_sequence": [
+    "<|eot_id|>",
+    "<|eot_id|><|start_header_id|>",
+    "assistant\n\n",
+    "!assistant",
+    "?assistant",
+    ".assistant"
+  ],
+  "stop": [
+    "<|eot_id|>",
+    "assistant\n\n",
+    "!assistant",
+    "?assistant",
+    ".assistant"
+  ],
+  "use_default_badwordsids": false,
+  "prompt": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nHello!<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nHello! It's nice to meet you. Is there something I can help you with, or would you like to chat? I'm here to assist you with any questions or topics you'd like to discuss.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
+}
