@@ -23,18 +23,12 @@ for path_part in script_dir[1:]:
 if len(full_path) > 0:
     full_path += "/"
     
-speaker_list_pool = [[full_path + "input/emma-watson.wav"],
-[full_path+"input/wake-up-call-v2.wav",full_path+"input/wake-up-output-v3.wav"],
-[full_path + "input/fem-audiobook-1-v3.wav"],
-[full_path + "input/holo-eng-v2.wav",full_path+"input/holo-eng-2.wav"],
-[full_path + "input/jillian-ashcraft.wav"],
+speaker_list_pool = [
+[full_path + "input/audio1.wav"],
+[full_path+"input/audio2.wav",
+full_path+"input/output-v3.wav"]
 ]
-# speaker_list = [full_path+"input/sw-audiobook.wav"]
-# speaker_list = [full_path + "input/emma-watson.wav"]
-# speaker_list = [full_path+"input/wake-up-call-v2.wav",full_path+"input/wake-up-output-v3.wav"]
-# speaker_list = [full_path + "input/fem-audiobook-1-v3.wav"]
-speaker_list = [full_path + "input/holo-eng-2.wav"]
-# speaker_list = [full_path + "input/ped.wav"]
+
 for speaker in speaker_list:
     if not os.path.exists(speaker):
         print(f'Path to speaker {speaker} not found, EXIT')
@@ -137,7 +131,7 @@ conf = BaseAudioConfig()
 conf = BaseAudioConfig(pitch_fmax=None, pitch_fmin=None)
 ap = TTS.TTS.utils.audio.AudioProcessor(**conf)
 
-os.system("cp " + full_path + "basefile.wav " + full_path + "final.wav")
+os.system("cp " + full_path + "audio_processing/basefile.wav " + full_path + "final.wav")
 
 if len(final_text) > 1:
     final_text = final_text[:-1]  # We use this to avoid junk data at the end of the sentence from the spliter
@@ -162,12 +156,12 @@ for sentence in final_text:
               + full_path + "appended_final.wav")
     os.system("ffmpeg -y -loglevel error "
               "-i " + full_path + "appended_final.wav "
-                                  "-i " + full_path + "silence.wav "
+                                  "-i " + full_path + "audio_processing/silence.wav "
                                                       "-filter_complex [0:a][1:a]concat=n=2:v=0:a=1 "
               + full_path + "final.wav")
 os.system("ffmpeg "
           "-i " + full_path + "final.wav "
-                              "-i " + full_path + "brown-noise.wav "
+                              "-i " + full_path + "audio_processing/brown-noise.wav "
                                                   "-filter_complex amix=inputs=2:duration=shortest "
           + full_path + "output.mp3 -y")
 try:
