@@ -16,6 +16,7 @@ import random
 from pathlib import Path
 import time
 import subprocess
+import tts_helper
 
 import requests
 from datetime import date
@@ -68,8 +69,6 @@ if len(full_path) > 0:
     full_path += "/"
 
 class XMPPBotStream(threading.Thread):
-
-
     def run(self):
         self.current_response = ""
         self.str_mfrom = ""
@@ -186,7 +185,7 @@ class XMPPBot(ClientXMPP):
                 #prompt = prompt.replace(line, new_line)
             # -------------------------------------------------------#
 
-                
+
         # -------------------------------------------------------#
 
         # Preprocessing the prompt format
@@ -203,6 +202,8 @@ class XMPPBot(ClientXMPP):
                 self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}\nASSISTANT: '
             case "llama3":
                 self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
+            case "phi-3":
+                self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}<|end|>\n<|assistant|>\n'
             case _:
                 raise "Config Error: No matching prompt format found"
 
@@ -232,10 +233,10 @@ class XMPPBot(ClientXMPP):
                 response = response.replace("<|im_end|>", "")
                 response = response.replace("<|im_start|>", "")
                 response = response.replace("\nuser", "")
-                # Add correcly formated chatml
+                # Add correctly formatted chatml
                 self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|im_end|>\n<|im_start|>user'
             case "mistral":
-                # clean badly formated mistral close brackets
+                # clean badly formatted mistral close brackets
                 response = response.split("\n[", 1)[0]
                 self.user_sessions[mfrom.bare]['prompt'] += f' {response} </s>'
             case "pygmalion":
@@ -249,6 +250,9 @@ class XMPPBot(ClientXMPP):
                 response = response.replace("?assistant","")
                 response = response.replace(".assistant","")
                 self.user_sessions[mfrom.bare]['prompt'] += response + '<|start_header_id|>user<|end_header_id|>\n\n'
+            case "phi-3":
+                response = response.replace("<|end|>","")
+                self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|end|>\n<|user|>\n'
         return response
 
     async def api_session(self, mfrom):
@@ -443,7 +447,7 @@ class XMPPBot(ClientXMPP):
                             file = open(full_path+"input.txt", "w")
                             file.write(response) # change this to response for normal voicemail mode
                             file.close()
-                            exec(open(full_path +'tts.py').read())
+                            exec(open(full_path +'tts_helper.py').read())
                             os.remove(full_path + "input.txt")
                             await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
                             filename=Path(full_path+"output.mp3")))
