@@ -5,7 +5,7 @@ UpperDeckBot is a powerful and flexible XMPP chatbot built using the slixmpp Pyt
 ## ✅ Key Features:
 
 1. 🔒 Security: UpperDeckBot leverages security focused the XMPP implementation of OMEMO to effortlessly create a end to end encrypted(E2EE) connections to large language models hosted on your local network, ensuring reduced latency and enhanced security.
-2. 🎨 Image Creation: Just describe what you want to the chatbot and it will create it via a function call Stable Diffusion Webui's API 
+2. 🎨 Image Creation: Just describe what you want to the chatbot and it will create it via a function call Stable Diffusion Webui's API.
 3. 📚 Retrieval Augmented Generation: UpperDeckBot Searches for information using locally hosted offline mirrors of Wikipedia to answer user requests allowing you to avoid hallucinated answers.
 4. 💬 TTS support: Integration with [XTTSv2](https://huggingface.co/coqui/XTTS-v2) allows for lifelike text to speech capabilities for UpperDeckBot’s responses.
 5. 🛠 Customizable: UpperDeckBot is designed for easy modification of both the system prompt as well as the addition of per users profiles as needed for different use cases.
@@ -17,7 +17,7 @@ UpperDeckBot is a powerful and flexible XMPP chatbot built using the slixmpp Pyt
 2. Integration with CLIP models for analysis of user uploaded images
 3. Parallelization of application processes for performence improvement
 
-## Getting Started:
+## 🚩 Getting Started:
 
 1. Clone the Repository
    ```
@@ -37,7 +37,7 @@ UpperDeckBot is a powerful and flexible XMPP chatbot built using the slixmpp Pyt
 5. Connect to the bot using your favorite OMEMO supporting XMPP client and start chatting. 
 
 
-## **License**:
+## ⚖️ License:
 
 UpperDeckBot is released under the GPLv3 License. 
 
