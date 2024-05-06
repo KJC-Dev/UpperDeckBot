@@ -34,7 +34,6 @@ UpperDeckBot is a powerful and flexible XMPP chatbot built using the slixmpp Pyt
    ```
 5. Connect to the bot using your favorite OMEMO supporting XMPP client and start chatting. 
 
-Contributions and Support:
 
 ## **License**:
 
