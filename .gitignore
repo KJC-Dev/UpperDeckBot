@@ -5,7 +5,6 @@ venv
 models
 create
 images
-input
 source
 TTS
 XTTS-v2
@@ -19,7 +18,5 @@ output.mp3
 output
 XTTS-V2
 output
-*.mp3
-*.wav
 =======
 image
