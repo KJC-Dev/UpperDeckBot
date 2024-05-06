@@ -3,7 +3,6 @@
 import asyncio
 import os
 import re
-import secrets
 import threading
 import sys
 import logging
@@ -16,13 +15,10 @@ import random
 from pathlib import Path
 import time
 import subprocess
-import tts_helper
-
 import requests
 from datetime import date
 import json
 import copy
-
 from bs4 import BeautifulSoup
 from slixmpp import ClientXMPP, JID
 from slixmpp.exceptions import IqTimeout, IqError
@@ -34,10 +30,20 @@ from slixmpp_omemo import PluginCouldNotLoad, MissingOwnKey, EncryptionPrepareEx
 from slixmpp_omemo import UndecidedException, UntrustedException, NoAvailableSession
 from omemo.exceptions import MissingBundleException
 
+import tts_middleware
+
+script_dir = sys.argv[0].split("/")[:-1]
+full_path = ""
+for path_part in script_dir[1:]:
+    full_path += "/" + path_part
+if len(full_path) > 0:
+    full_path += "/"
+
 log = logging.getLogger(__name__)
 DEFAULT_CONFIG_PATH = "config/defaults.json"
 DEFAULT_MODE = "llama.cpp"
 DEFAULT_API_HOST = "127.0.0.1:8080"
+DEFAULT_VOICE_PATH = full_path + "input/female-1.wav"
 DEFAULT_SD_HOST = "http://127.0.0.1:7860/sdapi/v1/txt2img"
 
 HEADERS = {
@@ -48,6 +54,7 @@ HEADERS = {
 # Used by the ChatBot
 LEVEL_DEBUG = 0
 LEVEL_ERROR = 1
+
 
 class Colors:
     HEADER = '\033[95m'
@@ -61,12 +68,7 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
-script_dir = sys.argv[0].split("/")[:-1]
-full_path = ""
-for path_part in script_dir[1:]:
-    full_path += "/" + path_part
-if len(full_path) > 0:
-    full_path += "/"
+
 
 class XMPPBotStream(threading.Thread):
     def run(self):
@@ -74,7 +76,7 @@ class XMPPBotStream(threading.Thread):
         self.str_mfrom = ""
         self.mfrom = JID()
         self.mfrom.bare = self.str_mfrom
-        i = 0;
+        i = 0
         # code for the background job goes here
         while i < 10:
             self.current_response = subprocess.check_output(["curl",
@@ -90,6 +92,7 @@ class XMPPBotStream(threading.Thread):
             time.sleep(5)
             print(self.current_response)
             xmpp.encrypted_reply(self.mfrom, "chat", self.current_response)
+
 
 class XMPPBot(ClientXMPP):
     """
@@ -109,7 +112,7 @@ class XMPPBot(ClientXMPP):
         'Content-Type': 'application/json'
     }
 
-    def __init__(self, jid, password, room, nick, config_path, mode, api_host, dry_run,voicemail,no_text,echo_run):
+    def __init__(self, jid, password, room, nick, config_path, mode, api_host, dry_run, tts, no_text, echo_run):
         ClientXMPP.__init__(self, jid, password)
 
         self.command_prefix_re: re.Pattern = re.compile('^%s' % self.cmd_prefix)
@@ -124,15 +127,21 @@ class XMPPBot(ClientXMPP):
                                                 ))
         with open(config_path, 'r') as file:
             self.character_card = json.load(file)
+        if tts is not None:
+            self.ac = tts_middleware.TTSAudioController()
+            self.tp = tts_middleware.TTSTextProcessor()
+
         self.room = room
         self.nick = nick
         self.mode = mode
         self.api_host = api_host
         self.user_sessions = {}
         self.dry_run = dry_run
-        self.voicemail = voicemail
+        self.tts = tts
         self.no_text = no_text
         self.echo_run = echo_run
+
+
 
     def start(self, _event) -> None:
         """
@@ -157,7 +166,7 @@ class XMPPBot(ClientXMPP):
                                          )
 
     async def extract_url(self, line):
-        regex = (r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
+        regex = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
         find_urls_in_string = re.compile(regex, re.IGNORECASE)
         url = find_urls_in_string.search(line)
         if url is not None and url.group(0) is not None:
@@ -170,21 +179,20 @@ class XMPPBot(ClientXMPP):
     async def api_call(self, mfrom, mtype, prompt):
 
         # if in echo debug mode simply return the prompt discarding any context
-        #if self.echo_run:
-		#	self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
+        # if self.echo_run:
+        #	self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
         #    return prompt
 
         # --Pre Function 2: Generic HTTP/HTTPS--
-        #for line in prompt.splitlines():
-            #if self.http_prefix in line or self.https_prefix in line:
-                #new_line = line.replace(self.http_prefix, 'Link:' + self.http_prefix)
-                #new_line = line.replace(self.https_prefix, 'Link:' + self.https_prefix)
-                #extracted_url = await self.extract_url(line)
+        # for line in prompt.splitlines():
+        # if self.http_prefix in line or self.https_prefix in line:
+        # new_line = line.replace(self.http_prefix, 'Link:' + self.http_prefix)
+        # new_line = line.replace(self.https_prefix, 'Link:' + self.https_prefix)
+        # extracted_url = await self.extract_url(line)
 
-                #new_line += "\nContents: " + await self.http_request(url=extracted_url)
-                #prompt = prompt.replace(line, new_line)
-            # -------------------------------------------------------#
-
+        # new_line += "\nContents: " + await self.http_request(url=extracted_url)
+        # prompt = prompt.replace(line, new_line)
+        # -------------------------------------------------------#
 
         # -------------------------------------------------------#
 
@@ -201,29 +209,28 @@ class XMPPBot(ClientXMPP):
             case "vicuna":
                 self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}\nASSISTANT: '
             case "llama3":
-                self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
+                self.user_sessions[mfrom.bare][
+                    'prompt'] += f'{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n'
             case "phi-3":
                 self.user_sessions[mfrom.bare]['prompt'] += f'{prompt}<|end|>\n<|assistant|>\n'
             case _:
                 raise "Config Error: No matching prompt format found"
 
-
-       # current_session = XMPPBotStream()
-       # current_session.mfrom = mfrom
-       # current_session.start()
+        # current_session = XMPPBotStream()
+        # current_session.mfrom = mfrom
+        # current_session.start()
         response = await self.api_session(mfrom)
 
-        #log.info(current_session.current_response)
+        # log.info(current_session.current_response)
         # Post functions
 
         # -------------------------------------------------------#
         # --Post Function 1: txt2img generation--
         for line in response.splitlines():
             if self.txt2img_prefix in line:
-                await self.encrypted_reply(mto=mfrom,mtype="chat", body=await self.upload_txt2img(txt2img_prompt=line))
+                await self.encrypted_reply(mto=mfrom, mtype="chat", body=await self.upload_txt2img(txt2img_prompt=line))
         # -------------------------------------------------------#
         # -------------------------------------------------------#
-
 
         match self.character_card['format']:
             case "alpaca":
@@ -246,12 +253,12 @@ class XMPPBot(ClientXMPP):
             case "vicuna":
                 self.user_sessions[mfrom.bare]['prompt'] += response + '\nUSER: '
             case "llama3":
-                response = response.replace("!assistant","")
-                response = response.replace("?assistant","")
-                response = response.replace(".assistant","")
+                response = response.replace("!assistant", "")
+                response = response.replace("?assistant", "")
+                response = response.replace(".assistant", "")
                 self.user_sessions[mfrom.bare]['prompt'] += response + '<|start_header_id|>user<|end_header_id|>\n\n'
             case "phi-3":
-                response = response.replace("<|end|>","")
+                response = response.replace("<|end|>", "")
                 self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|end|>\n<|user|>\n'
         return response
 
@@ -283,16 +290,14 @@ class XMPPBot(ClientXMPP):
         code_tags = [tag.get_text(strip=True) for tag in doc.findAll('code')]
         a_tags = [tag.get_text(strip=True) for tag in doc.findAll('a')]
 
-     #   code_tags = ["--help","--clblast"]
-        for idx,p_tag in enumerate(p_tags):
+        #   code_tags = ["--help","--clblast"]
+        for idx, p_tag in enumerate(p_tags):
             for code_tag in code_tags:
                 if code_tag in p_tag and code_tag != '':
-                    p_tags[idx] = p_tag.replace(code_tag," "+code_tag+" ")
-#            for a_tag in a_tags:
-#                if a_tag in p_tag and a_tag != '':
-#                    p_tags[idx] = p_tag.replace(a_tag," "+a_tag+" ")
-
-
+                    p_tags[idx] = p_tag.replace(code_tag, " " + code_tag + " ")
+        #            for a_tag in a_tags:
+        #                if a_tag in p_tag and a_tag != '':
+        #                    p_tags[idx] = p_tag.replace(a_tag," "+a_tag+" ")
 
         paragraphs = p_tags
         combined_text = ""
@@ -396,7 +401,7 @@ class XMPPBot(ClientXMPP):
             time.sleep(0.5)
             prompt = input("USER     ")
             output = await self.api_call(dry_run_jid, "chat", prompt)
-            log.info(output[1:])
+            log.info(output)
 
     async def message_handler(self, msg: Message, allow_untrusted: bool = False) -> None:
         """
@@ -441,18 +446,15 @@ class XMPPBot(ClientXMPP):
 
                 else:
 
-                        response = await self.api_call(mfrom, mtype, decoded_msg)
-                        if self.voicemail:
-                            # TODO remove hard coding and make more pythonic
-                            file = open(full_path+"input.txt", "w")
-                            file.write(response) # change this to response for normal voicemail mode
-                            file.close()
-                            exec(open(full_path +'tts_helper.py').read())
-                            os.remove(full_path + "input.txt")
-                            await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
-                            filename=Path(full_path+"output.mp3")))
-                        if not self.no_text:
-                            await self.encrypted_reply(mto, mtype, response)
+                    response = await self.api_call(mfrom, mtype, decoded_msg)
+                    if self.tts:
+                        response = self.tp.preprocess_text(input_text=response, rules_list=tts_middleware.default_rule_list)
+                        response_split = self.tp.split_text(input_text=response)
+                        self.ac.run_model(sentences=response_split, speakers=[ self.tts ])
+                        await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
+                            filename=Path(full_path + "output.mp3")))
+                    if not self.no_text:
+                        await self.encrypted_reply(mto, mtype, response)
 
         except (MissingOwnKey,):
             # The message is missing our own key, it was not encrypted for
@@ -481,11 +483,11 @@ class XMPPBot(ClientXMPP):
             # or not. Clients _should_ indicate that the message was not
             # trusted, or in undecided state, if they decide to decrypt it
             # anyway.
-        #    await self.plain_reply(
-        #        mto, mtype,
-        #        f'NOTICE: NEW DEVICE "{exn.device}" DETECTED FOR ACCOUNT "{exn.bare_jid}". '
-        #        f'WELCOME, NEW OR RETURNING USER.',
-        #    )
+            #    await self.plain_reply(
+            #        mto, mtype,
+            #        f'NOTICE: NEW DEVICE "{exn.device}" DETECTED FOR ACCOUNT "{exn.bare_jid}". '
+            #        f'WELCOME, NEW OR RETURNING USER.',
+            #    )
             # We resend, setting the `allow_untrusted` parameter to True.
             await self.message_handler(msg, allow_untrusted=True)
         except (EncryptionPrepareException,):
@@ -497,7 +499,7 @@ class XMPPBot(ClientXMPP):
             await self.plain_reply(mto, mtype, 'ERROR: EXCEPTION OCCURRED WHILE PROCESSING MESSAGE. IF ERROR '
                                                'PERSISTS CONTACT ADMIN. ERROR IS AS FOLLOWS.\n%r' % exn)
             raise
-            xmpp.disconnect(reason='ERROR: EXCEPTION OCCURRED' % exn)
+         #   xmpp.disconnect(reason='ERROR: EXCEPTION OCCURRED' % exn)
 
         return None
 
@@ -575,8 +577,6 @@ class XMPPBot(ClientXMPP):
                 )
                 raise
 
-        return None
-
 
 if __name__ == '__main__':
     # Setup the command line arguments.
@@ -619,13 +619,16 @@ if __name__ == '__main__':
     parser.add_argument("-a", "--api-host", dest="api_host",
                         help="The host where the API is being served from. Defaults to http://locahost:8080",
                         default=DEFAULT_API_HOST)
-    parser.add_argument("--voicemail", dest="voicemail",
-                        help="In voicemail mode the bot responds using an mp3 to generate a text to speech file. "
-                             "Can be used in addition to or in place of text responses",
-                        action='store_true',default=None)
+    parser.add_argument("-t", "--tts", dest="tts",
+                        help="In tts mode the bot responds with an mp3 file containing. "
+                             "Can be used in addition to or in place of text responses. "
+                             "--tts must be followed by a path to a .wav file to clone from",
+                        default=None)
+
     parser.add_argument("--no-text", dest="no_text",
-                        help="Do not respond using text. Implies --voicemail",
-                        action='store_true',default=None)
+                        help="Do not respond using text. Intended for use in combination with --tts for voice only "
+                             "responses.",
+                        action='store_true', default=None)
     parser.add_argument("--dry-run", dest="dry_run",
                         help="DEBUG: Connect normally but open a direct session with the underlying LLM, bypassing "
                              "XMPP on any subsequent messages",
@@ -658,14 +661,8 @@ if __name__ == '__main__':
     else:
         dry_run = False
 
-    if args.voicemail is not None:
-        voicemail = True
-    else:
-        voicemail = False
-
     if args.no_text is not None:
         no_text = True
-        voicemail = True
     else:
         no_text = False
 
@@ -673,7 +670,6 @@ if __name__ == '__main__':
         echo_run = True
     else:
         echo_run = False
-
 
     xmpp = XMPPBot(jid=args.jid,
                    password=args.password,
@@ -683,7 +679,7 @@ if __name__ == '__main__':
                    mode=args.mode,
                    api_host=args.api_host,
                    dry_run=dry_run,
-                   voicemail=voicemail,
+                   tts=args.tts,
                    no_text=no_text,
                    echo_run=echo_run)
 
@@ -693,6 +689,7 @@ if __name__ == '__main__':
     xmpp.register_plugin('xep_0045')  # Multi User Chat
     xmpp.register_plugin('xep_0363')  # file upload
     xmpp.register_plugin('xep_0454')  # OMEMO file upload
+
     try:
         xmpp.register_plugin(
             'xep_0384',

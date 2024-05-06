@@ -1,4 +1,4 @@
-__pychache__
+__pycache__
 omemo
 .idea
 venv
@@ -13,6 +13,7 @@ output.wav
 dev.py
 output-dev.wav
 input-dev.txt
+my_input
 output.wav
 output.mp3
 output
@@ -21,5 +22,4 @@ output
 *.mp3
 *.wav
 =======
-images
-
+image

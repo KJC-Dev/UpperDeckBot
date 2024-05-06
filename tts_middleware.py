@@ -8,10 +8,7 @@ from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.models.xtts import Xtts
 from TTS.config import BaseAudioConfig
 import os
-import argparse
 import sys
-import scipy
-import numpy as np
 import re
 import TTS.TTS.utils.audio.processor
 
@@ -22,24 +19,19 @@ for path_part in script_dir[1:]:
 if len(full_path) > 0:
     full_path += "/"
 
-speaker_list_pool = [
-    [full_path + "input/audio1.wav"],
-    [full_path + "input/audio2.wav",
-     full_path + "input/output-v3.wav"]
-]
-
-default_processing_rule_list = [["...", "."],
-                                ["..", "."],
-                                ["\"", ""],
-                                ["..", "."],
-                                ["\"", ""],
-                                ["’", "'"],
-                                ["”", ""],
-                                ["://", " "],
-                                ["\n", " "],
-                                ["TV", "television"],
-                                ["PC", "personal computer"],
-                                [" -", ", "]]
+default_min_sentence_length = 30
+default_rule_list = [["...", "."],
+                     ["..", "."],
+                     ["\"", ""],
+                     ["..", "."],
+                     ["\"", ""],
+                     ["’", "'"],
+                     ["”", ""],
+                     ["://", " "],
+                     ["\n", " "],
+                     ["TV", "television"],
+                     ["PC", "personal computer"],
+                     [" -", ", "]]
 
 
 class TTSAudioController:
@@ -47,33 +39,26 @@ class TTSAudioController:
     # List available 🐸TTS models
     # print(TTS().list_models())
     # Init TTS
-    def __init__(self, speaker_list):
-        for speaker in speaker_list:
-            if not os.path.exists(speaker):
-                print(f'Path to speaker {speaker} not found.')
-                raise FileNotFoundError
-                exit(1)
-
-        self.speaker_list = speaker_list
-
+    def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.config = XttsConfig()
         self.config.load_json(full_path + "XTTS-v2/config.json")
         self.model = Xtts.init_from_config(self.config)
         self.model.load_checkpoint(self.config, checkpoint_dir=full_path + "XTTS-v2/", eval=True)
         self.model.cuda()
-        conf = BaseAudioConfig(pitch_fmax=None, pitch_fmin=None)
-        self.audio_processor = TTS.TTS.utils.audio.AudioProcessor(**conf)
+        self.conf = BaseAudioConfig(pitch_fmax=None, pitch_fmin=None)
+        self.ap = TTS.TTS.utils.audio.AudioProcessor(**self.conf)
 
-    def run_model(self, input_text):
+    def run_model(self, sentences:list, speakers:list ):
+        for speaker in speakers:
+            if not os.path.exists(speaker):
+                raise FileNotFoundError(f'Path to speaker {speaker} not found.')
+                exit(1)
         os.system("cp " + full_path + "audio_processing/basefile.wav " + full_path + "final.wav")
-        if len(input_text) > 1:
-            final_text = input_text[:-1]  # We use this to avoid junk data at the end of the sentence from the spliter
-
-        for sentence in final_text:
+        for sentence in sentences:
             outputs = self.model.synthesize(text=sentence,
                                             config=self.config,
-                                            speaker_wav=speaker_list,
+                                            speaker_wav=speakers,
                                             language="en",
                                             top_k=50,
                                             top_p=0.7,
@@ -81,9 +66,8 @@ class TTSAudioController:
                                             repetition_penalty=2.0,
                                             do_sample=True,
                                             gpt_cond_len=9999)
-            self.audio_processor.save_wav(path=full_path + "output.wav",
-                                          wav=outputs['wav'],
-                                          sr=24000)
+
+            self.ap.save_wav(path=full_path + "output.wav",wav=outputs['wav'],sr=24000)
             os.system("ffmpeg -y  -loglevel error  "
                       "-i " + full_path + "final.wav "
                                           "-i " + full_path + "output.wav "
@@ -99,40 +83,27 @@ class TTSAudioController:
         try:
             os.remove(f'{full_path}final.wav')
             os.remove(f'{full_path}appended_final.wav')
+            os.remove(f'{full_path}output.wav')
         except:
             logging.warning("File was not removed correctly")
 
 
 class TTSTextProcessor:
-    def __init__(self, processing_rule_list):
-        self.processing_rule_list = processing_rule_list
-        self.min_sentence_length = 30
-        self.text
-
     def preprocess_text(self, input_text, rules_list):
         for rule in rules_list:
-            input_text = input_text.replace(*rule)
+            input_text = input_text.replace(*rule) # perform text substitutions based on t
         return input_text
 
     def split_text(self, input_text):
-        split_text = re.split(r'\.|\?|\!', input_text)
-
-        processed_text = ""
+        split_text = re.split(r'(\. |\?|\!)', input_text)
         for index, sentence in enumerate(split_text):
-            if index < len(split_text) - 1:
-                if len(sentence) < self.min_sentence_length:
-                    sentence += ", "
-                else:
-                    sentence += "."
-                for word in ["who,what,when,where,why,how"]:
-                    if word in sentence.lower():
-                        sentence += "?"
-                        break
-            processed_text += sentence
-        return re.split(r'\.|\?|\!', processed_text)
-
-speaker_list = ["input/ordis.wav"]
-# Get device
+            if len(sentence) > 0:
+                try:
+                    split_text[index]+= split_text[index + 1]+" "
+                    split_text[index+1] = ""
+                except:
+                    pass
+        return list(filter(None, split_text))
 
 
 
