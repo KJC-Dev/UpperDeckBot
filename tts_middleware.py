@@ -31,7 +31,9 @@ default_rule_list = [["...", "."],
                      ["\n", " "],
                      ["TV", "television"],
                      ["PC", "personal computer"],
-                     [" -", ", "]]
+                     [" -", ", "],
+                     ["*",""],
+                     ["^",""]]
 
 
 class TTSAudioController:

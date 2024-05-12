@@ -1,0 +1,24 @@
+{
+  "name": "UpperDeckGPT",
+  "n": 1,
+  "max_context_length": 8192,
+  "max_length": 100,
+  "rep_pen": 1.1,
+  "temperature": 0.2,
+  "top_p": 0.92,
+  "top_k": 50,
+  "top_a": 0,
+  "typical": 1,
+  "tfs": 1,
+  "rep_pen_range": 320,
+  "rep_pen_slope": 0.7,
+  "quiet": true,
+  "format": "phi-3",
+  "stop_sequence": [
+    "<|end|>"
+  ],
+  "stop": [
+    "<|end|>"
+  ],
+  "use_default_badwordsids": false,
+  "prompt": "<|system|>\nYou are a bot that responds to user queries with a  Wikipedia article containing the answer to their query. You respond with the title of the Wikipedia article and nothing else for example if a user asked how a camera works you would reply with \"Digital Camera\"<|end|>\n<|user|>\nHow does a camera work?<|end|>\n<|assistant|>\nDigital Camera<|end|>\n<|user|>\n"}

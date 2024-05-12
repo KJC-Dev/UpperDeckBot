@@ -68,8 +68,6 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
-
-
 class XMPPBotStream(threading.Thread):
     def run(self):
         self.current_response = ""
@@ -141,8 +139,6 @@ class XMPPBot(ClientXMPP):
         self.no_text = no_text
         self.echo_run = echo_run
 
-
-
     def start(self, _event) -> None:
         """
         Process the session_start event.
@@ -179,9 +175,9 @@ class XMPPBot(ClientXMPP):
     async def api_call(self, mfrom, mtype, prompt):
 
         # if in echo debug mode simply return the prompt discarding any context
-        # if self.echo_run:
-        #	self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
-        #    return prompt
+        if self.echo_run:
+            self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
+            return prompt
 
         # --Pre Function 2: Generic HTTP/HTTPS--
         # for line in prompt.splitlines():
@@ -219,7 +215,7 @@ class XMPPBot(ClientXMPP):
         # current_session = XMPPBotStream()
         # current_session.mfrom = mfrom
         # current_session.start()
-        response = await self.api_session(mfrom)
+        response = await self.api_session(mfrom, self.mode)
 
         # log.info(current_session.current_response)
         # Post functions
@@ -228,7 +224,7 @@ class XMPPBot(ClientXMPP):
         # --Post Function 1: txt2img generation--
         for line in response.splitlines():
             if self.txt2img_prefix in line:
-                await self.encrypted_reply(mto=mfrom, mtype="chat", body=await self.upload_txt2img(txt2img_prompt=line))
+                await self.encrypted_reply(mto=mfrom, mtype=mtype, body=await self.upload_txt2img(txt2img_prompt=line))
         # -------------------------------------------------------#
         # -------------------------------------------------------#
 
@@ -262,20 +258,26 @@ class XMPPBot(ClientXMPP):
                 self.user_sessions[mfrom.bare]['prompt'] += f'{response}<|end|>\n<|user|>\n'
         return response
 
-    async def api_session(self, mfrom):
+    async def api_session(self, mfrom, api_mode):
         # making the call
-        match self.mode:
-            case "llama.cpp":
-                response = requests.post(f'{self.api_host}/completion', headers=self.headers,
-                                         data=json.dumps(self.user_sessions[mfrom.bare]))
-                response_json = json.loads(response.text)
-                return response_json['content']
+        response_json = {}
+        try:
+            match api_mode:
+                case "llama.cpp":
+                    response = requests.post(f'{self.api_host}/completion', headers=self.headers,
+                                             data=json.dumps(self.user_sessions[mfrom.bare]))
+                    response_json = json.loads(response.text)
+                    return response_json['content']
 
-            case "kobold.cpp":
-                response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
-                                         data=json.dumps(self.user_sessions[mfrom.bare]))
-                response_json = response.json()
-                return response_json['results'][0]['text']
+                case "kobold.cpp":
+                    response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
+                                             data=json.dumps(self.user_sessions[mfrom.bare]))
+                    response_json = response.json()
+                    return response_json['results'][0]['text']
+
+        except KeyError:
+            raise requests.HTTPError(
+                "INVALID JSON ENDPOINT DETECTED. PLEASE SPECIFY THE CORRECT ENDPOINT THE PROGRAM ARGUMENTs")
 
     # leave 500 tokens left for actual answering the question and followup questions
     async def http_request(self, url: str):
@@ -392,6 +394,25 @@ class XMPPBot(ClientXMPP):
         else:
             return None
 
+    def llm_available(self):
+        test_json = '{"n_predict": 1,"max_length": 1,"prompt": ""}'
+        try:
+            match self.mode:
+                case "llama.cpp":
+                    response = requests.post(f'{self.api_host}/completion', headers=self.headers,
+                                             data=test_json)
+                    response_json = json.loads(response.text)
+                    response_json['content']
+                case "kobold.cpp":
+                    response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
+                                             data=test_json)
+                    response_json = response.json()
+                    response_json['results'][0]['text']
+            return True
+
+        except:
+            raise requests.HTTPError("LLM API NOT CONFIGURED AS EXPECTED. CHECK YOUR ARGUMENTS.")
+
     async def dry_run_mode(self) -> None:
         self.user_sessions["dryrun@example.com"] = copy.deepcopy(self.character_card)
         dry_run_jid = JID()
@@ -448,9 +469,10 @@ class XMPPBot(ClientXMPP):
 
                     response = await self.api_call(mfrom, mtype, decoded_msg)
                     if self.tts:
-                        response = self.tp.preprocess_text(input_text=response, rules_list=tts_middleware.default_rule_list)
+                        response = self.tp.preprocess_text(input_text=response,
+                                                           rules_list=tts_middleware.default_rule_list)
                         response_split = self.tp.split_text(input_text=response)
-                        self.ac.run_model(sentences=response_split, speakers=[ self.tts ])
+                        self.ac.run_model(sentences=response_split, speakers=[self.tts])
                         await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
                             filename=Path(full_path + "output.mp3")))
                     if not self.no_text:
@@ -496,10 +518,11 @@ class XMPPBot(ClientXMPP):
             # and given a chance to resolve them already.
             await self.plain_reply(mto, mtype, 'ERROR: UNABLE TO DECRYPT MESSAGE.')
         except (Exception,) as exn:
-            await self.plain_reply(mto, mtype, 'ERROR: EXCEPTION OCCURRED WHILE PROCESSING MESSAGE. IF ERROR '
-                                               'PERSISTS CONTACT ADMIN. ERROR IS AS FOLLOWS.\n%r' % exn)
+            if exn is not ValueError('Invalid padding bytes.'):
+                await self.plain_reply(mto, mtype, 'ERROR: EXCEPTION OCCURRED WHILE PROCESSING MESSAGE. IF ERROR '
+                                                   'PERSISTS CONTACT ADMIN. ERROR IS AS FOLLOWS.\n%r' % exn)
             raise
-         #   xmpp.disconnect(reason='ERROR: EXCEPTION OCCURRED' % exn)
+        #   xmpp.disconnect(reason='ERROR: EXCEPTION OCCURRED' % exn)
 
         return None
 
@@ -630,8 +653,8 @@ if __name__ == '__main__':
                              "responses.",
                         action='store_true', default=None)
     parser.add_argument("--dry-run", dest="dry_run",
-                        help="DEBUG: Connect normally but open a direct session with the underlying LLM, bypassing "
-                             "XMPP on any subsequent messages",
+                        help="DEBUG: Open a direct session with the LLM, bypassing "
+                             "the XMPP server. This option effectively turns the CLI",
                         action='store_true', default=None)
     parser.add_argument("--echo-run", dest="echo_run",
                         help="DEBUG: Connect normally but echo the users input back to them, bypassing The LLM "
@@ -683,28 +706,39 @@ if __name__ == '__main__':
                    no_text=no_text,
                    echo_run=echo_run)
 
-    xmpp.register_plugin('xep_0030')  # Service Discovery
-    xmpp.register_plugin('xep_0199')  # XMPP Ping
-    xmpp.register_plugin('xep_0380')  # Explicit Message Encryption
-    xmpp.register_plugin('xep_0045')  # Multi User Chat
-    xmpp.register_plugin('xep_0363')  # file upload
-    xmpp.register_plugin('xep_0454')  # OMEMO file upload
+    if not xmpp.llm_available():
+        exit(1)
 
-    try:
-        xmpp.register_plugin(
-            'xep_0384',
-            {
-                'data_dir': args.data_dir,
-            },
-            module=slixmpp_omemo,
-        )  # OMEMO
-    except (PluginCouldNotLoad,):
-        log.exception('And error occurred when loading the omemo plugin.')
-        sys.exit(1)
+    if xmpp.dry_run:
+        log.debug("DRY RUN MODE FLAG DETECTED BYPASSING XMPP CONNECTION")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.create_task(xmpp.dry_run_mode())
+        loop.run_forever()
+    else:
 
-    # Connect to the XMPP server and start processing XMPP stanzas.
-    xmpp.connect()
-    xmpp.process()
+        xmpp.register_plugin('xep_0030')  # Service Discovery
+        xmpp.register_plugin('xep_0199')  # XMPP Ping
+        xmpp.register_plugin('xep_0380')  # Explicit Message Encryption
+        xmpp.register_plugin('xep_0045')  # Multi User Chat
+        xmpp.register_plugin('xep_0363')  # file upload
+        xmpp.register_plugin('xep_0454')  # OMEMO file upload
+
+        try:
+            xmpp.register_plugin(
+                'xep_0384',
+                {
+                    'data_dir': args.data_dir,
+                },
+                module=slixmpp_omemo,
+            )  # OMEMO
+        except (PluginCouldNotLoad,):
+            log.exception('And error occurred when loading the omemo plugin.')
+            sys.exit(1)
+
+        # Connect to the XMPP server and start processing XMPP stanzas.
+        xmpp.connect()
+        xmpp.process()
 
 """
 ⠀⠀⠀⠀⡾⣦⡀⠀⠀⡀⠀⣰⢷⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
