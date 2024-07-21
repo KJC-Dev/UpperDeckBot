@@ -6,6 +6,8 @@ import re
 import threading
 import sys
 import logging
+from collections.abc import AsyncGenerator
+from aiohttp import ClientSession
 from PIL import Image
 from io import BytesIO
 import base64
@@ -46,11 +48,33 @@ DEFAULT_API_HOST = "127.0.0.1:8080"
 DEFAULT_VOICE_PATH = full_path + "input/female-1.wav"
 DEFAULT_SD_HOST = "http://127.0.0.1:7860/sdapi/v1/txt2img"
 
-HEADERS = {
-    'accept': 'application/json',
-    'Content-Type': 'application/json'
+DEFAULT_HEADERS = {
+    "User-Agent": "aiohttp",
+    "Content-Type": "application/json",
+    "Connection": "keep-alive",
+    "Accept": "text/event-stream",
 }
 
+DEFAULT_COMPLETION_OPTIONS = {
+    # Llama-3 style prompt template shown in this example
+    "prompt": f"<|start_header_id|>system<|end_header_id|>\n\nYou are a Zen master and mystical poet.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nWrite a short haiku about llamas.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+    # ChatML style prompt template shown below
+    # "prompt": f"<|im_start|>system\nYou are a Zen master and mystical poet.\n<|im_end|>\n<|im_start|>user\nWrite a short haiku about llamas.\n<|im_end|>\n<|im_start|>assistant\n",
+    "temperature": 0.8,
+    "top_k": 40,
+    "top_p": 0.95,
+    "min_p": 0.05,
+    "repeat_penalty": 1.1,
+    "n_predict": -1,
+    "seed": -1,
+    "id_slot": -1,
+    "cache_prompt": False,
+    # Likely need to add more stop tokens below to support more model types.
+    "stop": ["<|eot_id|>", "<|im_end|>", "<|endoftext|>", "<|end|>", "</s>"],
+    "stream": True,
+}
+
+DEFAULT_RESPONSE_BODY_START_STRING = "data: ".encode("utf-8")
 # Used by the ChatBot
 LEVEL_DEBUG = 0
 LEVEL_ERROR = 1
@@ -92,6 +116,108 @@ class XMPPBotStream(threading.Thread):
             xmpp.encrypted_reply(self.mfrom, "chat", self.current_response)
 
 
+class LlamaCppAPIClient:
+    """headers and options can be overriden at constructions time or per inference call"""
+
+    def __init__(self, base_url: str = "http://localhost:8080", headers: dict = {}, options: dict = {}):
+        # override defaults with whatever userland passes into constructor
+        self.base_url = base_url
+        self.headers = DEFAULT_HEADERS
+        self.headers.update(headers)
+        self.options = DEFAULT_COMPLETION_OPTIONS
+        self.options.update(options)
+
+    async def stream_completion(
+        self, chat_thread: list[dict] = [], format: str = "Llama-3"
+    ) -> AsyncGenerator[dict, None]:
+        """Stream LLaMA.cpp HTTP Server API POST /completion responses"""
+        try:
+            # convert chat_thread to a template formatted prompt string
+            prompt = chat_to_prompt(chat_thread=chat_thread, format=format)
+
+            # set the HTTP headers and /completion API options
+            url = self.base_url.rstrip("/") + "/completion"
+            combined_headers = self.headers
+            combined_options = self.options
+            combined_options.update({"prompt": prompt})
+
+            async with ClientSession() as session:
+                async with session.post(url=url, headers=combined_headers, json=combined_options) as response:
+                    if not response.status == 200:
+                        raise Exception(f"HTTP Response: {response.status}")
+
+                    async for raw_line in response.content:
+                        if len(raw_line) == 1:
+                            continue
+                        if raw_line[: len(DEFAULT_RESPONSE_BODY_START_STRING)] != DEFAULT_RESPONSE_BODY_START_STRING:
+                            # FIXME: this is brittle code, not sure if another json decoder and skip the "data: " part...
+                            raise Exception("Invalid response body starting string, unable to parse response...")
+                        line = raw_line.decode("utf-8")[len(DEFAULT_RESPONSE_BODY_START_STRING) :]
+                        yield json.loads(line)
+        except Exception as e:
+            raise e
+
+
+def chat_to_prompt(chat_thread: list[dict], format: str) -> str:
+    """Accepts a list of dicts in the OpenAI style chat thread and returns string with specified prompt template applied."""
+    # There must be a better way to do this e.g.
+    # https://github.com/ggerganov/llama.cpp/commit/8768b4f5ea1de69a4cace0481fdba70d89a47e47
+
+    # Initialize result as empty string
+    result = ""
+
+    # Check if the chat is not empty or only contains system/user roles
+    if len(chat_thread) == 0:
+        raise ValueError("Chat thread cannot be empty.")
+
+    for _, message in enumerate(chat_thread):
+        # Error check to ensure 'role' and 'content' keys exist in each dict
+        try:
+            role = message["role"]
+            content = message["content"]
+        except KeyError as e:
+            raise ValueError(f"Each chat thread item must contain both 'role' and 'content' keys: {e}")
+
+        if role not in ["system", "user", "assistant"]:
+            raise ValueError("Chat thread only supports 'system', 'user', and 'assistant' roles.")
+
+        # TODO Apply chat template formats or jinja templates and return prompt string.
+        # Could use jinja templates e.g. https://github.com/vllm-project/vllm/blob/main/examples/template_chatml.jinja
+        # This is clunky hacky but gets a minimal PoC going quick...
+        match format:
+            # template["ChatML"] = f"<|im_start|>system\n{system_prompt}\n<|im_end|>\n<|im_start|>user\n{user_prompt}\n<|im_end|>\n<|im_start|>assistant\n"
+            # Do not prepend the BOS as that seems to cause hallucinations...
+            # llama_tokenize_internal: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?
+            case "ChatML":
+                result += f"<|im_start|>{role}\n{content}\n<|im_end|>\n"
+            # template["Llama-3"] =  f"<|start_header_id|>system<|end_header_id|>\n\n{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{user_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+            # Unclear if need to prepend BOS to start: https://huggingface.co/meta-llama/Meta-Llama-3-8B/discussions/35 .. does not seem to hurt anything...
+            # Don't add BOS, llama.cpp server side is doing that: llama_tokenize_internal: Added a BOS token to the prompt as specified by the model but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens. Are you sure this is what you want?
+            case "Llama-3":
+                result += f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>"
+            # Phi-3 might not support system prompt, but try anyway. "{{ bos_token }}{% for message in messages %}\n{% if message['role'] == 'user' %}\n{{ '<|user|>\n' + message['content'] + '<|end|>' }}\n{% elif message['role'] == 'system' %}\n{{ '<|system|>\n' + message['content'] + '<|end|>' }}\n{% elif message['role'] == 'assistant' %}\n{{ '<|assistant|>\n'  + message['content'] + '<|end|>' }}\n{% endif %}\n{% if loop.last and add_generation_prompt %}\n{{ '<|assistant|>' }}\n{% endif %}\n{% endfor %}"
+            # skip prepending BOS for now, haven't tested as much as above but seems fine without it...
+            case "Phi-3":
+                # if result == "":
+                #     result += "<s>\n"
+                result += f"<|{role}|>\n{content}<|end|>\n"
+            case "Raw":
+            # just concatanate all content fields if userland wants to pass raw string
+                result += f"{content}"
+            case _:
+                raise NotImplementedError(f"{format} not in list of supported formats e.g. ChatML, Llama-3, Phi-3, Raw...")
+
+    # chat threads must end by cueing the assistant to begin generation
+    match format:
+        case "ChatML":
+            result += "<|im_start|>assistant\n"
+        case "Llama-3":
+            result += "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        case "Phi-3":
+            result += "<|assistant|>\n"
+    return result
+
+
 class XMPPBot(ClientXMPP):
     """
     A simple Slixmpp bot that will query a number of different popular API's for Large Language models
@@ -110,7 +236,7 @@ class XMPPBot(ClientXMPP):
         'Content-Type': 'application/json'
     }
 
-    def __init__(self, jid, password, room, nick, config_path, mode, api_host, dry_run, tts, no_text, echo_run):
+    def __init__(self, jid, password, room, nick, config_path, mode, api_host, dry_run, tts, voice_only, echo_bot_mode):
         ClientXMPP.__init__(self, jid, password)
 
         self.command_prefix_re: re.Pattern = re.compile('^%s' % self.cmd_prefix)
@@ -119,6 +245,7 @@ class XMPPBot(ClientXMPP):
 
         self.add_event_handler("session_start", self.start)
         #  self.add_event_handler("groupchat_message", self.muc_message)
+        # noinspection PyTypeChecker
         self.register_handler(CoroutineCallback('Messages',
                                                 MatchXPath(f'{{{self.default_ns}}}message'),
                                                 self.message_handler,
@@ -126,7 +253,7 @@ class XMPPBot(ClientXMPP):
         with open(config_path, 'r') as file:
             self.character_card = json.load(file)
         if tts is not None:
-            self.ac = tts_middleware.TTSAudioController()
+            self.ac = tts_middleware.TTSAudioController(temperature=.75)
             self.tp = tts_middleware.TTSTextProcessor()
 
         self.room = room
@@ -136,8 +263,8 @@ class XMPPBot(ClientXMPP):
         self.user_sessions = {}
         self.dry_run = dry_run
         self.tts = tts
-        self.no_text = no_text
-        self.echo_run = echo_run
+        self.voice_only = voice_only
+        self.echo_bot_mode = echo_bot_mode
 
     def start(self, _event) -> None:
         """
@@ -175,7 +302,7 @@ class XMPPBot(ClientXMPP):
     async def api_call(self, mfrom, mtype, prompt):
 
         # if in echo debug mode simply return the prompt discarding any context
-        if self.echo_run:
+        if self.echo_bot_mode:
             self.user_sessions[mfrom.bare] = copy.deepcopy(self.character_card)
             return prompt
 
@@ -330,6 +457,7 @@ class XMPPBot(ClientXMPP):
         current_time = int(time.time())
         img_path = str(sys.path[0]) + "/images/" + str(current_time) + ".png"
         img.save(img_path)
+        # noinspection PyTypedDict
         upload_link = await self.plugin['xep_0454'].upload_file(filename=Path(img_path))
 
         return upload_link
@@ -339,9 +467,6 @@ class XMPPBot(ClientXMPP):
 
     def is_txt2img(self, body: str) -> bool:
         return self.txt2img_prefix_re.match(body) is not None
-
-    def is_http(self, body: str) -> bool:
-        return self.http_prefix.match(body) is not None
 
     async def handle_command(self, mto: JID, mtype: str, body: str) -> None:
         match = self.cmd_re.match(body)
@@ -360,9 +485,6 @@ class XMPPBot(ClientXMPP):
             await self.cmd_resetcontext(mto, mtype)
         elif cmd == 'rc':
             await self.cmd_resetcontext(mto, mtype)
-        elif cmd == 's':
-
-            await self.cmd_shell(mto, mtype, body)
 
         return None
 
@@ -387,13 +509,6 @@ class XMPPBot(ClientXMPP):
         body = '''NOTICE: CONTEXT WINDOW CLEARED SUCCESSFULLY.'''
         return await self.encrypted_reply(mto, mtype, body)
 
-    async def cmd_shell(self, mto: JID, mtype: str, body: str) -> None:
-        if mto.bare == "kyler@upperdeckcommittee.xyz":
-            body = subprocess.check_output(body[3:], shell=True).decode('utf-8')
-            return await self.encrypted_reply(mto, mtype, body)
-        else:
-            return None
-
     def llm_available(self):
         test_json = '{"n_predict": 1,"max_length": 1,"prompt": ""}'
         try:
@@ -402,16 +517,17 @@ class XMPPBot(ClientXMPP):
                     response = requests.post(f'{self.api_host}/completion', headers=self.headers,
                                              data=test_json)
                     response_json = json.loads(response.text)
-                    response_json['content']
+                    response = response_json['content']
                 case "kobold.cpp":
                     response = requests.post(f'{self.api_host}/api/v1/generate', headers=self.headers,
                                              data=test_json)
                     response_json = response.json()
-                    response_json['results'][0]['text']
+                    response = response_json['results'][0]['text']
             return True
 
-        except:
-            raise requests.HTTPError("LLM API NOT CONFIGURED AS EXPECTED. CHECK YOUR ARGUMENTS.")
+        except KeyError:
+            raise json.JSONDecodeError("ERROR: MISMATCHED JSON RESPONSE FROM HOST. ARE YOU USING THE CORRECT MODE FOR "
+                                       "YOUR BACKEND?",doc="",pos=0)
 
     async def dry_run_mode(self) -> None:
         self.user_sessions["dryrun@example.com"] = copy.deepcopy(self.character_card)
@@ -473,9 +589,11 @@ class XMPPBot(ClientXMPP):
                                                            rules_list=tts_middleware.default_rule_list)
                         response_split = self.tp.split_text(input_text=response)
                         self.ac.run_model(sentences=response_split, speakers=[self.tts])
+                        # noinspection PyTypedDict
                         await self.encrypted_reply(mto, mtype, await self.plugin['xep_0454'].upload_file(
-                            filename=Path(full_path + "output.mp3")))
-                    if not self.no_text:
+                            filename=Path(f'{full_path}final.mp3')))
+                        os.remove("final.mp3")
+                    if not self.voice_only:
                         await self.encrypted_reply(mto, mtype, response)
 
         except (MissingOwnKey,):
@@ -526,6 +644,7 @@ class XMPPBot(ClientXMPP):
 
         return None
 
+    # noinspection PyTypeChecker
     async def plain_reply(self, mto: JID, mtype: str, body):
         """
         Helper to reply to messages
@@ -535,6 +654,7 @@ class XMPPBot(ClientXMPP):
         msg['body'] = body
         return msg.send()
 
+    # noinspection PyTypeChecker
     async def encrypted_reply(self, mto: JID, mtype: str, body):
         """Helper to reply with encrypted messages"""
 
@@ -542,7 +662,7 @@ class XMPPBot(ClientXMPP):
         msg['eme']['namespace'] = self.eme_ns
         msg['eme']['name'] = self['xep_0380'].mechanisms[self.eme_ns]
 
-        expect_problems = {}  # type: Optional[Dict[JID, List[int]]]
+        expect_problems = {}  # type: #Optional[Dict[JID, List[int]]]
 
         while True:
             try:
@@ -579,7 +699,7 @@ class XMPPBot(ClientXMPP):
                         # device won't be able to decrypt and should display a
                         # generic message. The receiving end-user at this
                         # point can bring up the issue if it happens.
-                        self.plain_reply(
+                        await self.plain_reply(
                             mto, mtype,
                             f'Could not find keys for device "{error.device}"'
                             f' of recipient "{error.bare_jid}". Skipping.',
@@ -588,7 +708,7 @@ class XMPPBot(ClientXMPP):
                         device_list = expect_problems.setdefault(jid, [])
                         device_list.append(error.device)
             except (IqError, IqTimeout) as exn:
-                self.plain_reply(
+                await self.plain_reply(
                     mto, mtype,
                     'An error occured while fetching information on a recipient.\n%r' % exn,
                 )
@@ -648,7 +768,7 @@ if __name__ == '__main__':
                              "--tts must be followed by a path to a .wav file to clone from",
                         default=None)
 
-    parser.add_argument("--no-text", dest="no_text",
+    parser.add_argument("--voice-only", dest="voice_only",
                         help="Do not respond using text. Intended for use in combination with --tts for voice only "
                              "responses.",
                         action='store_true', default=None)
@@ -656,7 +776,7 @@ if __name__ == '__main__':
                         help="DEBUG: Open a direct session with the LLM, bypassing "
                              "the XMPP server. This option effectively turns the CLI",
                         action='store_true', default=None)
-    parser.add_argument("--echo-run", dest="echo_run",
+    parser.add_argument("--echo", dest="echo_bot_mode",
                         help="DEBUG: Connect normally but echo the users input back to them, bypassing The LLM "
                              "entirely",
                         action='store_true', default=None)
@@ -684,15 +804,15 @@ if __name__ == '__main__':
     else:
         dry_run = False
 
-    if args.no_text is not None:
-        no_text = True
+    if args.voice_only is not None:
+        voice_only = True
     else:
-        no_text = False
+        voice_only = False
 
-    if args.echo_run is not None:
-        echo_run = True
+    if args.echo_bot_mode is not None:
+        echo_bot_mode = True
     else:
-        echo_run = False
+        echo_bot_mode = False
 
     xmpp = XMPPBot(jid=args.jid,
                    password=args.password,
@@ -703,10 +823,10 @@ if __name__ == '__main__':
                    api_host=args.api_host,
                    dry_run=dry_run,
                    tts=args.tts,
-                   no_text=no_text,
-                   echo_run=echo_run)
+                   voice_only=voice_only,
+                   echo_bot_mode=echo_bot_mode)
 
-    if not xmpp.llm_available():
+    if not echo_bot_mode and not xmpp.llm_available():
         exit(1)
 
     if xmpp.dry_run:

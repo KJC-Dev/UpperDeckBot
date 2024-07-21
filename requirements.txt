@@ -1,6 +1,7 @@
 Requests==2.31.0
 slixmpp==1.8.5
 slixmpp_omemo==0.9.1
-beautifulsoup4
+beautifulsoup4~=4.12.3
 protobuf<4.24,>=3.19.6
-TTS
+pillow~=10.3.0
+OMEMO~=0.14.0
